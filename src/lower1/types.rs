@@ -49,8 +49,6 @@ pub fn ty_to_oomir_type<'tcx>(
             // Get the full path string for the ADT
             let full_path_str = tcx.def_path_str(adt_def.did());
 
-            println!("{full_path_str} Substs: {:?}", substs);
-
             if full_path_str == "String" || full_path_str == "std::string::String" {
                 oomir::Type::String
             } else {
@@ -110,28 +108,43 @@ pub fn ty_to_oomir_type<'tcx>(
                 }
 
                 if adt_def.is_struct() {
-                    let variant = adt_def.variant(0usize.into());
-                    let oomir_fields = variant
-                        .fields
-                        .iter()
-                        .map(|field_def| {
-                            let field_name = field_def.ident(tcx).to_string();
-                            let field_mir_ty = field_def.ty(tcx, substs);
-                            let field_oomir_type =
-                                ty_to_oomir_type(field_mir_ty, tcx, data_types, instance_context);
-                            (field_name, field_oomir_type)
-                        })
-                        .collect::<Vec<_>>();
-                    data_types.insert(
-                        jvm_name_full.clone(),
-                        oomir::DataType::Class {
-                            fields: oomir_fields,
-                            is_abstract: false,
-                            methods: HashMap::new(),
-                            super_class: None,
-                            interfaces: vec![],
-                        },
-                    );
+                    if !data_types.contains_key(&jvm_name_full) {
+                        // Insert a placeholder up-front so recursive/self-referential
+                        // type graphs don't infinitely recurse while resolving fields.
+                        data_types.insert(
+                            jvm_name_full.clone(),
+                            oomir::DataType::Class {
+                                fields: vec![],
+                                is_abstract: false,
+                                methods: HashMap::new(),
+                                super_class: None,
+                                interfaces: vec![],
+                            },
+                        );
+
+                        let variant = adt_def.variant(0usize.into());
+                        let oomir_fields = variant
+                            .fields
+                            .iter()
+                            .map(|field_def| {
+                                let field_name = field_def.ident(tcx).to_string();
+                                let field_mir_ty = field_def.ty(tcx, substs);
+                                let field_oomir_type = ty_to_oomir_type(
+                                    field_mir_ty,
+                                    tcx,
+                                    data_types,
+                                    instance_context,
+                                );
+                                (field_name, field_oomir_type)
+                            })
+                            .collect::<Vec<_>>();
+
+                        if let Some(oomir::DataType::Class { fields, .. }) =
+                            data_types.get_mut(&jvm_name_full)
+                        {
+                            *fields = oomir_fields;
+                        }
+                    }
                 } else if adt_def.is_enum() {
                     // the enum in general
                     if !data_types.contains_key(&jvm_name_full) {
