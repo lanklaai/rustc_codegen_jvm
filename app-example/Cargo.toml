@@ -1,0 +1,10 @@
+cargo-features = ["profile-rustflags"]
+
+[package]
+name = "jvm-backend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+datafusion = "53.0.0"
+
