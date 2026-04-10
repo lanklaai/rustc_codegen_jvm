@@ -3,8 +3,60 @@
     "descriptor": "(Ljava/lang/String;)Ljava/lang/String;",
     "is_static": true
   },
+  "Command_arg_str": {
+    "descriptor": "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+    "is_static": true
+  },
+  "Command_new": {
+    "descriptor": "(Ljava/lang/Object;)Ljava/lang/Object;",
+    "is_static": true
+  },
+  "Command_new_OsString": {
+    "descriptor": "(Ljava/lang/Object;)Ljava/lang/Object;",
+    "is_static": true
+  },
+  "Command_new_str": {
+    "descriptor": "(Ljava/lang/String;)Ljava/lang/Object;",
+    "is_static": true
+  },
+  "Option_OsString_branch": {
+    "descriptor": "(Ljava/lang/Object;)Ljava/lang/Object;",
+    "is_static": true
+  },
+  "Option_OsString_expect": {
+    "descriptor": "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
+    "is_static": true
+  },
+  "Option_OsString_filter_closure": {
+    "descriptor": "(Ljava/lang/Object;Ljava/lang/Object;)Z",
+    "is_static": true
+  },
+  "Option_OsString_is_some": {
+    "descriptor": "(Ljava/lang/Object;)Z",
+    "is_static": true
+  },
+  "Option_OsString_unwrap": {
+    "descriptor": "(Ljava/lang/Object;)Ljava/lang/Object;",
+    "is_static": true
+  },
+  "Option_OsString_unwrap_or_else_closure": {
+    "descriptor": "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+    "is_static": true
+  },
   "Option_is_none": {
     "descriptor": "(Ljava/lang/Object;)Z",
+    "is_static": true
+  },
+  "Option_u32_from_residual": {
+    "descriptor": "(Ljava/lang/Object;)Ljava/lang/Object;",
+    "is_static": true
+  },
+  "Option_u32_unwrap_or": {
+    "descriptor": "(Ljava/lang/Object;I)I",
+    "is_static": true
+  },
+  "Option_u8_unwrap_or": {
+    "descriptor": "(Ljava/lang/Object;I)I",
     "is_static": true
   },
   "Option_unwrap": {
@@ -19,8 +71,28 @@
     "descriptor": "(Ljava/lang/Object;)Z",
     "is_static": true
   },
+  "OsString_deref": {
+    "descriptor": "(Ljava/lang/Object;)Ljava/lang/String;",
+    "is_static": true
+  },
+  "OsString_eq": {
+    "descriptor": "(Ljava/lang/Object;Ljava/lang/Object;)Z",
+    "is_static": true
+  },
+  "PathBuf_from": {
+    "descriptor": "(Ljava/lang/Object;)Ljava/lang/String;",
+    "is_static": true
+  },
   "arguments_new_const_1": {
     "descriptor": "([Ljava/lang/String;)Ljava/lang/String;",
+    "is_static": true
+  },
+  "char_methods_char_is_ascii": {
+    "descriptor": "(C)Z",
+    "is_static": true
+  },
+  "char_methods_char_is_ascii_digit": {
+    "descriptor": "(C)Z",
     "is_static": true
   },
   "compare_bytes": {
@@ -47,12 +119,20 @@
     "descriptor": "(I)Ljava/lang/String;",
     "is_static": true
   },
+  "core_fmt_rt_Argument_new_display_str": {
+    "descriptor": "(Ljava/lang/String;)Ljava/lang/String;",
+    "is_static": true
+  },
   "core_fmt_rt_Arguments_new_const_1": {
     "descriptor": "([Ljava/lang/String;)Ljava/lang/String;",
     "is_static": true
   },
   "core_panicking_panic": {
     "descriptor": "(Ljava/lang/String;)V",
+    "is_static": true
+  },
+  "core_slice_str_contains": {
+    "descriptor": "(Ljava/lang/Object;Ljava/lang/Object;)Z",
     "is_static": true
   },
   "core_slice_u8_starts_with": {
@@ -127,12 +207,28 @@
     "descriptor": "(Ljava/lang/Object;Ljava/lang/Object;)Z",
     "is_static": true
   },
+  "slice_u8_get_unchecked_usize": {
+    "descriptor": "(Ljava/lang/Object;I)I",
+    "is_static": true
+  },
+  "slice_u8_get_usize": {
+    "descriptor": "(Ljava/lang/Object;I)I",
+    "is_static": true
+  },
   "std_char_encode_utf8_raw": {
     "descriptor": "(J[[S)[[S",
     "is_static": true
   },
+  "std_fs_read_to_string_str": {
+    "descriptor": "(Ljava/lang/String;)Ljava/lang/String;",
+    "is_static": true
+  },
   "std_intrinsics_size_of_val_u8": {
     "descriptor": "(Ljava/lang/Object;)J",
+    "is_static": true
+  },
+  "std_io_print": {
+    "descriptor": "(Ljava/lang/Object;)V",
     "is_static": true
   },
   "std_rt_panic_fmt": {
@@ -161,6 +257,14 @@
   },
   "u8_equal": {
     "descriptor": "(Ljava/lang/Object;Ljava/lang/Object;)Z",
+    "is_static": true
+  },
+  "var_os_str": {
+    "descriptor": "(Ljava/lang/String;)Ljava/lang/String;",
+    "is_static": true
+  },
+  "var_str": {
+    "descriptor": "(Ljava/lang/String;)Ljava/lang/String;",
     "is_static": true
   }
 }

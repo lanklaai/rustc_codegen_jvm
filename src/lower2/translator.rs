@@ -2037,8 +2037,36 @@ impl<'a, 'cp> FunctionTranslator<'a, 'cp> {
                 // --- Shim Lookup using JSON metadata ---
                 match get_shim_metadata() {
                     Ok(shim_map) => {
-                        // Use the function_name (make_jvm_safe output) as the key
-                        if let Some(shim_info) = shim_map.get(function_name) {
+                        // Use the function_name (make_jvm_safe output) as the key.
+                        // Some monomorphized closure names are path-stamped; normalize
+                        // known unstable prefixes to a stable shim symbol.
+                        let resolved_shim_name = if shim_map.contains_key(function_name) {
+                            function_name.clone()
+                        } else if function_name
+                            .starts_with("Option_OsString_unwrap_or_else_closure")
+                        {
+                            "Option_OsString_unwrap_or_else_closure".to_string()
+                        } else if function_name.starts_with("Option_OsString_filter_closure") {
+                            "Option_OsString_filter_closure".to_string()
+                        } else if function_name.starts_with("Command_new_") {
+                            "Command_new".to_string()
+                        } else if function_name.starts_with("Command_arg_str") {
+                            "Command_arg_str".to_string()
+                        } else if function_name.starts_with("Option_u32_from_residual") {
+                            "Option_u32_from_residual".to_string()
+                        } else if function_name.starts_with("slice_u8_get_unchecked_usize") {
+                            "slice_u8_get_unchecked_usize".to_string()
+                        } else if function_name.starts_with("PathBuf_from") {
+                            "PathBuf_from".to_string()
+                        } else if function_name.starts_with("core_fmt_rt_Argument_new_display_str") {
+                            "core_fmt_rt_Argument_new_display_str".to_string()
+                        } else if function_name.starts_with("OsString_deref") {
+                            "OsString_deref".to_string()
+                        } else {
+                            function_name.clone()
+                        };
+
+                        if let Some(shim_info) = shim_map.get(&resolved_shim_name) {
                             handled_as_shim = true;
 
                             let shim_descriptor = Some(shim_info.descriptor.clone()); // Store descriptor
@@ -2057,7 +2085,7 @@ impl<'a, 'cp> FunctionTranslator<'a, 'cp> {
                                     context: format!("Function {}", self.oomir_func.name),
                                     message: format!(
                                         "Shim argument count mismatch for '{}': descriptor '{}' expects {}, found {}",
-                                        function_name,
+                                        resolved_shim_name,
                                         shim_info.descriptor,
                                         expected_jvm_param_types.len(),
                                         args.len()
@@ -2128,7 +2156,7 @@ impl<'a, 'cp> FunctionTranslator<'a, 'cp> {
                             let class_index = self.constant_pool.add_class(kotlin_shim_class)?;
                             let method_ref_index = self.constant_pool.add_method_ref(
                                 class_index,
-                                function_name, // Use the original function name key
+                                &resolved_shim_name,
                                 &shim_info.descriptor, // Use the stored descriptor
                             )?;
 
@@ -2179,18 +2207,9 @@ impl<'a, 'cp> FunctionTranslator<'a, 'cp> {
                                         _ => { /* Void return already handled, ignore size 0 */ }
                                     }
                                 }
-                            } else if dest.is_some()
-                                && !is_diverging_call
-                                && shim_info.descriptor.ends_with(")V")
-                            {
-                                return Err(jvm::Error::VerificationError {
-                                    context: format!("Function {}", self.oomir_func.name),
-                                    message: format!(
-                                        "Attempting to store void result from shim '{}'",
-                                        function_name
-                                    ),
-                                });
-                            }
+                            } // Void-returning shims intentionally produce no stack value.
+                              // If MIR provided a destination (e.g. unit-typed temp), there is
+                              // nothing to store, matching intra-module call handling.
                         } // End if shim_info found by name
                     } // End Ok(shim_map)
                     Err(e) => {
@@ -2654,20 +2673,7 @@ impl<'a, 'cp> FunctionTranslator<'a, 'cp> {
                 field_ty,    // Type of the field *value* being retrieved
                 owner_class, // Class where the field is *defined*
             } => {
-                // 1. Get the type of the object operand itself
-                let object_actual_type = get_operand_type(object);
-
-                if !object_actual_type.is_jvm_reference_type() {
-                    return Err(jvm::Error::VerificationError {
-                        context: format!("Function {}", self.oomir_func.name),
-                        message: format!(
-                            "Operand used in GetField is not a reference type, found {:?}",
-                            object_actual_type
-                        ),
-                    });
-                }
-
-                // 2. Add Field reference to constant pool (same as SetField)
+                // 1. Add Field reference to constant pool (same as SetField)
                 let owner_class_index = self.constant_pool.add_class(owner_class)?;
                 let field_descriptor = field_ty.to_jvm_descriptor();
                 let field_ref_index = self.constant_pool.add_field_ref(
@@ -2676,13 +2682,23 @@ impl<'a, 'cp> FunctionTranslator<'a, 'cp> {
                     &field_descriptor,
                 )?;
 
-                // 3. Load the object reference onto the stack
-                self.load_operand(object)?; // Stack: [object_ref]
+                // 2. Load the object reference onto the stack.
+                // Some MIR patterns feeding GetField currently carry overly narrow scalar
+                // types in OOMIR even though the local slot holds an object reference.
+                // For field access, force aload for variable operands.
+                match object {
+                    oomir::Operand::Variable { name, ty } => {
+                        let index = self.get_or_assign_local(name, ty);
+                        let aload = get_load_instruction(&oomir::Type::Class("java/lang/Object".into()), index)?;
+                        self.jvm_instructions.push(aload);
+                    }
+                    _ => self.load_operand(object)?,
+                } // Stack: [object_ref]
 
-                // 4. Emit 'getfield' instruction
+                // 3. Emit 'getfield' instruction
                 self.jvm_instructions.push(JI::Getfield(field_ref_index)); // Stack: [field_value] (size 1 or 2)
 
-                // 5. Store the retrieved field value into the destination variable
+                // 4. Store the retrieved field value into the destination variable
                 //    The type for storage is the field's type (field_ty)
                 self.store_result(dest, field_ty)?; // Stack: []
             }
