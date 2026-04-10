@@ -1,5 +1,7 @@
 package org.rustlang.core
 
+import java.nio.file.Files
+import java.nio.file.Path
 import java.lang.reflect.Field
 import java.util.Objects
 
@@ -89,6 +91,167 @@ public object Core {
     }
 
     @JvmStatic
+    public fun std_io_print(arg: Any?) {
+        when (arg) {
+            null -> kotlin.io.print("null")
+            is String -> kotlin.io.print(arg)
+            else -> kotlin.io.print(arg.toString())
+        }
+    }
+
+    @JvmStatic
+    public fun char_methods_char_is_ascii(value: Char): Boolean {
+        return value.code <= 0x7F
+    }
+
+    @JvmStatic
+    public fun char_methods_char_is_ascii_digit(value: Char): Boolean {
+        return value.code <= 0x7F && value.isDigit()
+    }
+
+    @JvmStatic
+    public fun var_os_str(name: String): String? {
+        return System.getenv(name)
+    }
+
+    @JvmStatic
+    public fun var_str(name: String): String? {
+        return System.getenv(name)
+    }
+
+    @JvmStatic
+    public fun Command_new(command: Any?): Any {
+        return ProcessBuilder(command?.toString() ?: "")
+    }
+
+    @JvmStatic
+    public fun Command_new_str(command: String): Any {
+        return Command_new(command)
+    }
+
+    @JvmStatic
+    public fun Command_new_OsString(command: Any?): Any {
+        return Command_new(command)
+    }
+
+    @JvmStatic
+    public fun Command_arg_str(commandObj: Any?, arg: String): Any? {
+        if (commandObj is ProcessBuilder) {
+            val args = commandObj.command().toMutableList()
+            args.add(arg)
+            commandObj.command(args)
+            return commandObj
+        }
+        return commandObj
+    }
+
+    @JvmStatic
+    public fun OsString_eq(a: Any?, b: Any?): Boolean {
+        return (a?.toString() ?: "") == (b?.toString() ?: "")
+    }
+
+    @JvmStatic
+    public fun OsString_deref(value: Any?): String {
+        return value?.toString() ?: ""
+    }
+
+    @JvmStatic
+    public fun Option_OsString_branch(optionObj: Any?): Any? {
+        // Keep Option payload shape intact; callers can continue matching on variants.
+        return optionObj
+    }
+
+    @JvmStatic
+    public fun Option_OsString_unwrap(optionObj: Any?): Any? {
+        return Option_unwrap(optionObj)
+    }
+
+    @JvmStatic
+    public fun Option_OsString_expect(optionObj: Any?, message: String?): Any? {
+        if (Option_is_none(optionObj)) {
+            panic_fmt(message ?: "called `Option::expect()` on a `None` value")
+            throw RuntimeException("Unreachable after panic")
+        }
+        return Option_unwrap(optionObj)
+    }
+
+    @JvmStatic
+    public fun Option_OsString_unwrap_or_else_closure(optionObj: Any?, fallback: Any?): Any? {
+        if (!Option_is_none(optionObj)) {
+            return Option_unwrap(optionObj)
+        }
+        return fallback
+    }
+
+    @JvmStatic
+    public fun Option_OsString_is_some(optionObj: Any?): Boolean {
+        return !Option_is_none(optionObj)
+    }
+
+    @JvmStatic
+    public fun Option_OsString_filter_closure(_captured: Any?, value: Any?): Boolean {
+        return value?.toString()?.isNotEmpty() ?: false
+    }
+
+    @JvmStatic
+    public fun Option_u32_unwrap_or(optionObj: Any?, defaultValue: Int): Int {
+        if (Option_is_none(optionObj)) {
+            return defaultValue
+        }
+        val value = Option_unwrap(optionObj)
+        return when (value) {
+            is Int -> value
+            is Number -> value.toInt()
+            else -> defaultValue
+        }
+    }
+
+    @JvmStatic
+    public fun Option_u8_unwrap_or(optionObj: Any?, defaultValue: Int): Int {
+        return Option_u32_unwrap_or(optionObj, defaultValue) and 0xFF
+    }
+
+    @JvmStatic
+    public fun Option_u32_from_residual(residual: Any?): Any? {
+        return residual
+    }
+
+    @JvmStatic
+    public fun slice_u8_get_usize(sliceObj: Any?, index: Int): Int {
+        return when (sliceObj) {
+            is ByteArray -> sliceObj[index].toInt() and 0xFF
+            is ShortArray -> sliceObj[index].toInt() and 0xFF
+            is IntArray -> sliceObj[index] and 0xFF
+            else -> throw IllegalArgumentException("slice_u8_get_usize expects a byte-like array")
+        }
+    }
+
+    @JvmStatic
+    public fun slice_u8_get_unchecked_usize(sliceObj: Any?, index: Int): Int {
+        return slice_u8_get_usize(sliceObj, index)
+    }
+
+    @JvmStatic
+    public fun std_fs_read_to_string_str(path: String): String {
+        return Files.readString(Path.of(path))
+    }
+
+    @JvmStatic
+    public fun PathBuf_from(pathLike: Any?): String {
+        return pathLike?.toString() ?: ""
+    }
+
+    @JvmStatic
+    public fun core_slice_str_contains(haystack: Any?, needle: Any?): Boolean {
+        return when (haystack) {
+            is Array<*> -> haystack.contains(needle)
+            is List<*> -> haystack.contains(needle)
+            is String -> needle?.toString()?.let { haystack.contains(it) } ?: false
+            else -> false
+        }
+    }
+
+    @JvmStatic
     public fun arguments_new_const_1(pieces: Array<String>): String {
         // Concatenate all the string pieces together.
         // This mimics the simplest formatting scenario where pieces are just joined.
@@ -106,6 +269,11 @@ public object Core {
     public fun core_fmt_rt_Argument_new_display(value: Any?): String {
         // Convert the value to a string.
         return value?.toString() ?: "null"
+    }
+
+    @JvmStatic
+    public fun core_fmt_rt_Argument_new_display_str(value: String?): String {
+        return value ?: "null"
     }
 
     @JvmStatic
