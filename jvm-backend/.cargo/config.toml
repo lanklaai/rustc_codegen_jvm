@@ -1,8 +1,8 @@
 [build]
 rustflags = [
-  "-Z", "codegen-backend=../target/release/librustc_codegen_jvm.so",
-  "-C", "linker=../target/release/java-linker",
-  "-C", "link-args=../library/build/distributions/library-0.1.0/lib/library-0.1.0.jar ../library/build/distributions/library-0.1.0/lib/kotlin-stdlib-2.2.21.jar ../library/build/distributions/library-0.1.0/lib/annotations-13.0.jar --r8-jar ../vendor/r8.jar --proguard-config ../proguard/default.pro"
+  "-Z", "codegen-backend=/workspace/rustc_codegen_jvm/target/release/librustc_codegen_jvm.so",
+  "-C", "linker=/workspace/rustc_codegen_jvm/java-linker/target/release/java-linker",
+  "-C", "link-args=/workspace/rustc_codegen_jvm/library/build/distributions/library-0.1.0/lib/library-0.1.0.jar /workspace/rustc_codegen_jvm/library/build/distributions/library-0.1.0/lib/kotlin-stdlib-2.2.21.jar /workspace/rustc_codegen_jvm/library/build/distributions/library-0.1.0/lib/annotations-13.0.jar --r8-jar /workspace/rustc_codegen_jvm/vendor/r8.jar --proguard-config /workspace/rustc_codegen_jvm/proguard/default.pro"
 ]
 
 # Throwing a JVM exception will unwind and give a stack trace, no need for rust to handle unwinding.

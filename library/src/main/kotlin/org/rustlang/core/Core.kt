@@ -230,6 +230,11 @@ public object Core {
     }
 
     @JvmStatic
+    public fun Result_Output_std_io_Error_ok(resultObj: Any?): Any? {
+        return resultObj
+    }
+
+    @JvmStatic
     public fun Result_String_VarError_unwrap_or_default(resultObj: Any?): String {
         if (resultObj == null) {
             return ""
@@ -348,6 +353,18 @@ public object Core {
         var argIndex = 0
         for (i in pieces.indices) {
             sb.append(pieces[i])
+        }
+        return sb.toString()
+    }
+
+    @JvmStatic
+    public fun Arguments_new(pieces: Array<String>, args: Array<Any?>): String {
+        val sb = StringBuilder()
+        for (i in pieces.indices) {
+            sb.append(pieces[i])
+            if (i < args.size) {
+                sb.append(args[i]?.toString() ?: "null")
+            }
         }
         return sb.toString()
     }
