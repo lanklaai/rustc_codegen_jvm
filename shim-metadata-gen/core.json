@@ -3,6 +3,10 @@
     "descriptor": "(Ljava/lang/String;)Ljava/lang/String;",
     "is_static": true
   },
+  "Arguments_new": {
+    "descriptor": "([Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;",
+    "is_static": true
+  },
   "Command_arg_str": {
     "descriptor": "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
     "is_static": true
@@ -93,6 +97,10 @@
   },
   "PathBuf_from": {
     "descriptor": "(Ljava/lang/Object;)Ljava/lang/String;",
+    "is_static": true
+  },
+  "Result_Output_std_io_Error_ok": {
+    "descriptor": "(Ljava/lang/Object;)Ljava/lang/Object;",
     "is_static": true
   },
   "Result_String_VarError_unwrap_or_default": {

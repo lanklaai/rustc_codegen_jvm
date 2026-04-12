@@ -2054,10 +2054,18 @@ impl<'a, 'cp> FunctionTranslator<'a, 'cp> {
                             "Command_arg_str".to_string()
                         } else if function_name.starts_with("Option_u32_from_residual") {
                             "Option_u32_from_residual".to_string()
+                        } else if function_name.starts_with("Option_Output_branch") {
+                            "Option_OsString_branch".to_string()
                         } else if function_name.starts_with("slice_u8_get_unchecked_usize") {
                             "slice_u8_get_unchecked_usize".to_string()
                         } else if function_name.starts_with("PathBuf_from") {
                             "PathBuf_from".to_string()
+                        } else if function_name.starts_with("Path_new_") {
+                            "PathBuf_from".to_string()
+                        } else if function_name.starts_with("Arguments_new_") {
+                            "Arguments_new".to_string()
+                        } else if function_name.starts_with("core_fmt_rt_Arguments_new_") {
+                            "core_fmt_rt_Arguments_new_const_1".to_string()
                         } else if function_name.starts_with("core_fmt_rt_Argument_new_display_str") {
                             "core_fmt_rt_Argument_new_display_str".to_string()
                         } else if function_name.starts_with("OsString_deref") {
