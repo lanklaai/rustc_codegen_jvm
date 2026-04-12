@@ -19,6 +19,10 @@
     "descriptor": "(Ljava/lang/String;)Ljava/lang/Object;",
     "is_static": true
   },
+  "Command_output": {
+    "descriptor": "(Ljava/lang/Object;)Ljava/lang/Object;",
+    "is_static": true
+  },
   "Option_OsString_branch": {
     "descriptor": "(Ljava/lang/Object;)Ljava/lang/Object;",
     "is_static": true
@@ -29,6 +33,10 @@
   },
   "Option_OsString_filter_closure": {
     "descriptor": "(Ljava/lang/Object;Ljava/lang/Object;)Z",
+    "is_static": true
+  },
+  "Option_OsString_is_none": {
+    "descriptor": "(Ljava/lang/Object;)Z",
     "is_static": true
   },
   "Option_OsString_is_some": {
@@ -71,6 +79,10 @@
     "descriptor": "(Ljava/lang/Object;)Z",
     "is_static": true
   },
+  "OsStr_is_empty": {
+    "descriptor": "(Ljava/lang/Object;)Z",
+    "is_static": true
+  },
   "OsString_deref": {
     "descriptor": "(Ljava/lang/Object;)Ljava/lang/String;",
     "is_static": true
@@ -81,6 +93,14 @@
   },
   "PathBuf_from": {
     "descriptor": "(Ljava/lang/Object;)Ljava/lang/String;",
+    "is_static": true
+  },
+  "Result_String_VarError_unwrap_or_default": {
+    "descriptor": "(Ljava/lang/Object;)Ljava/lang/String;",
+    "is_static": true
+  },
+  "Version_ge": {
+    "descriptor": "(Ljava/lang/Object;Ljava/lang/Object;)Z",
     "is_static": true
   },
   "arguments_new_const_1": {
@@ -125,6 +145,10 @@
   },
   "core_fmt_rt_Arguments_new_const_1": {
     "descriptor": "([Ljava/lang/String;)Ljava/lang/String;",
+    "is_static": true
+  },
+  "core_num_u8_wrapping_shr": {
+    "descriptor": "(II)I",
     "is_static": true
   },
   "core_panicking_panic": {

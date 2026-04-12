@@ -146,6 +146,14 @@ public object Core {
     }
 
     @JvmStatic
+    public fun Command_output(commandObj: Any?): Any? {
+        if (commandObj !is ProcessBuilder) {
+            return null
+        }
+        return commandObj.start()
+    }
+
+    @JvmStatic
     public fun OsString_eq(a: Any?, b: Any?): Boolean {
         return (a?.toString() ?: "") == (b?.toString() ?: "")
     }
@@ -153,6 +161,11 @@ public object Core {
     @JvmStatic
     public fun OsString_deref(value: Any?): String {
         return value?.toString() ?: ""
+    }
+
+    @JvmStatic
+    public fun OsStr_is_empty(value: Any?): Boolean {
+        return value?.toString()?.isEmpty() ?: true
     }
 
     @JvmStatic
@@ -189,6 +202,11 @@ public object Core {
     }
 
     @JvmStatic
+    public fun Option_OsString_is_none(optionObj: Any?): Boolean {
+        return Option_is_none(optionObj)
+    }
+
+    @JvmStatic
     public fun Option_OsString_filter_closure(_captured: Any?, value: Any?): Boolean {
         return value?.toString()?.isNotEmpty() ?: false
     }
@@ -212,8 +230,44 @@ public object Core {
     }
 
     @JvmStatic
+    public fun Result_String_VarError_unwrap_or_default(resultObj: Any?): String {
+        if (resultObj == null) {
+            return ""
+        }
+
+        return try {
+            when {
+                resultObj::class.java.name.endsWith("\$Ok") -> {
+                    val field = resultObj::class.java.getDeclaredField("field0")
+                    field.isAccessible = true
+                    field.get(resultObj)?.toString() ?: ""
+                }
+                resultObj::class.java.name.endsWith("\$Err") -> ""
+                else -> resultObj.toString()
+            }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    @JvmStatic
     public fun Option_u32_from_residual(residual: Any?): Any? {
         return residual
+    }
+
+    @JvmStatic
+    public fun Version_ge(left: Any?, right: Any?): Boolean {
+        if (left == null || right == null) {
+            return false
+        }
+        val leftString = left.toString()
+        val rightString = right.toString()
+        return leftString >= rightString
+    }
+
+    @JvmStatic
+    public fun core_num_u8_wrapping_shr(value: Int, rhs: Int): Int {
+        return ((value and 0xFF) ushr (rhs and 0x07)) and 0xFF
     }
 
     @JvmStatic
