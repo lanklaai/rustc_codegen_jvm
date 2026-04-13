@@ -2050,8 +2050,24 @@ impl<'a, 'cp> FunctionTranslator<'a, 'cp> {
                             "Option_OsString_filter_closure".to_string()
                         } else if function_name.starts_with("Command_new_") {
                             "Command_new".to_string()
+                        } else if function_name.starts_with("Command_status") {
+                            "Command_status".to_string()
                         } else if function_name.starts_with("Command_arg_str") {
                             "Command_arg_str".to_string()
+                        } else if function_name.starts_with("Command_arg_") {
+                            "Command_arg_Object".to_string()
+                        } else if function_name.starts_with("Command_args_") {
+                            "Command_args".to_string()
+                        } else if function_name.starts_with("Command_env_remove_str") {
+                            "Command_env_remove_str".to_string()
+                        } else if function_name.starts_with("Stdio_null") {
+                            "Stdio_null".to_string()
+                        } else if function_name.starts_with("Command_stderr_") {
+                            "Command_stderr_Stdio".to_string()
+                        } else if function_name.starts_with("Command_stdout_") {
+                            "Command_stdout_Stdio".to_string()
+                        } else if function_name.starts_with("Command_stdin_") {
+                            "Command_stdin_Stdio".to_string()
                         } else if function_name.starts_with("Option_u32_from_residual") {
                             "Option_u32_from_residual".to_string()
                         } else if function_name.starts_with("Option_Output_branch") {
@@ -2062,14 +2078,73 @@ impl<'a, 'cp> FunctionTranslator<'a, 'cp> {
                             "PathBuf_from".to_string()
                         } else if function_name.starts_with("Path_new_") {
                             "PathBuf_from".to_string()
+                        } else if function_name.starts_with("Path_join_str") {
+                            "Path_join_str".to_string()
+                        } else if function_name.starts_with("Path_with_extension_str") {
+                            "Path_with_extension_str".to_string()
+                        } else if function_name.starts_with("String_is_empty") {
+                            "String_is_empty".to_string()
+                        } else if function_name.starts_with("ExitStatus_success") {
+                            "ExitStatus_success".to_string()
                         } else if function_name.starts_with("Arguments_new_") {
                             "Arguments_new".to_string()
                         } else if function_name.starts_with("core_fmt_rt_Arguments_new_") {
                             "core_fmt_rt_Arguments_new_const_1".to_string()
                         } else if function_name.starts_with("core_fmt_rt_Argument_new_display_str") {
                             "core_fmt_rt_Argument_new_display_str".to_string()
+                        } else if function_name.starts_with("core_fmt_rt_Argument_new_display_") {
+                            "core_fmt_rt_Argument_new_display".to_string()
+                        } else if function_name.starts_with("create_dir_") {
+                            "create_dir_PathBuf".to_string()
+                        } else if function_name.starts_with("remove_dir_all_") {
+                            "remove_dir_all_PathBuf".to_string()
+                        } else if function_name.starts_with("from_utf8") {
+                            "from_utf8".to_string()
+                        } else if function_name.starts_with("std_io_Error_kind") {
+                            "std_io_Error_kind".to_string()
+                        } else if function_name.starts_with("std_io_Error_raw_os_error") {
+                            "std_io_Error_raw_os_error".to_string()
+                        } else if function_name.starts_with("Option_str_branch") {
+                            "Option_str_branch".to_string()
+                        } else if function_name.starts_with("core_str_str_split_char") {
+                            "core_str_str_split_char".to_string()
+                        } else if function_name.starts_with("ErrorKind_ne") {
+                            "ErrorKind_ne".to_string()
+                        } else if function_name.starts_with("ErrorKind_eq") {
+                            "ErrorKind_eq".to_string()
+                        } else if function_name.starts_with("Path_display") {
+                            "Path_display".to_string()
+                        } else if function_name.starts_with("std_str_Split_char_next") {
+                            "std_str_Split_char_next".to_string()
+                        } else if function_name.starts_with("std_str_Split_char_into_iter") {
+                            "std_str_Split_char_into_iter".to_string()
+                        } else if function_name.ends_with("_next") {
+                            "iterator_next".to_string()
+                        } else if function_name.starts_with("Option_str_ne") {
+                            "Option_str_ne".to_string()
+                        } else if function_name.starts_with("Option_i32_eq") {
+                            "Option_i32_eq".to_string()
+                        } else if function_name.starts_with("Option_OsString_into_iter") {
+                            "Option_OsString_into_iter".to_string()
+                        } else if function_name.starts_with("std_option_IntoIter_OsString_as_Iterator_chain_Option_OsString") {
+                            "std_option_IntoIter_OsString_as_Iterator_chain_Option_OsString"
+                                .to_string()
+                        } else if function_name.contains("_as_Iterator_chain_") {
+                            "iterator_chain".to_string()
+                        } else if function_name.starts_with("once_OsString") {
+                            "once_OsString".to_string()
+                        } else if function_name.starts_with("core_str_str_parse_u32") {
+                            "core_str_str_parse_u32".to_string()
+                        } else if function_name.starts_with("std_io_eprint") {
+                            "std_io_eprint".to_string()
+                        } else if function_name == "exit" || function_name.starts_with("std_process_exit") {
+                            "exit".to_string()
+                        } else if function_name.starts_with("Result_u32_ParseIntError_ok") {
+                            "Result_u32_ParseIntError_ok".to_string()
                         } else if function_name.starts_with("OsString_deref") {
                             "OsString_deref".to_string()
+                        } else if function_name.ends_with("_deref") {
+                            "deref".to_string()
                         } else {
                             function_name.clone()
                         };
