@@ -408,12 +408,18 @@ pub fn convert_basic_block<'tcx>(
                                     )
                                 }
                             } else {
-                                // External function: check for special cases, otherwise use path-based key for shims
-                                let def_path = tcx.def_path_str(*def_id);
-
-                                // Special case: core::str::<impl str>::len maps to our Kotlin shim's len method
-                                if def_path.contains("::str::") && def_path.ends_with("::len") {
-                                    ("len".to_string(), false)
+                                // External function:
+                                // Prefer the same monomorphized naming strategy we use for local
+                                // functions so upstream `core`/`std` monomorphizations can be
+                                // called directly when they are codegened into the module.
+                                // Fall back to the legacy shim key format when we cannot recover
+                                // an FnDef call operand.
+                                if let Some(mono_name) =
+                                    super::naming::mono_fn_name_from_call_operand(
+                                        func, tcx, instance,
+                                    )
+                                {
+                                    (mono_name, false)
                                 } else {
                                     (make_jvm_safe(format!("{:?}", func).as_str()), false)
                                 }

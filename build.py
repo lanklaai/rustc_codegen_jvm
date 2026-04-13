@@ -260,10 +260,14 @@ def all_tasks():
     if not Config.IS_CI:
         install_rust_components()
         generate_config_files()
-    
-    # The order defines the dependency chain.
-    build_library()
-    generate_shim_metadata()
+
+    # Optional legacy Kotlin shims. Native std support does not require these.
+    enable_kotlin_shims = os.getenv("RCGJVM_ENABLE_KOTLIN_SHIMS", "0") == "1"
+    if enable_kotlin_shims:
+        # The order defines the dependency chain.
+        build_library()
+        generate_shim_metadata()
+
     build_rust_backend()
     build_java_linker()
     vendor_r8()

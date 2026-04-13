@@ -18,6 +18,11 @@ pub(super) type ShimMap = HashMap<String, ShimInfo>;
 // --- Lazy Static Loader for Shims (Reads JSON File) ---
 
 static SHIM_METADATA: OnceLock<Result<ShimMap, String>> = OnceLock::new();
+static SHIMS_ENABLED: OnceLock<bool> = OnceLock::new();
+
+pub(super) fn kotlin_shims_enabled() -> bool {
+    *SHIMS_ENABLED.get_or_init(|| std::env::var("RCGJVM_ENABLE_KOTLIN_SHIMS").as_deref() == Ok("1"))
+}
 
 pub(super) fn get_shim_metadata() -> Result<&'static ShimMap, &'static str> {
     SHIM_METADATA

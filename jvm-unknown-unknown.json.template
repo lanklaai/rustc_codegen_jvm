@@ -13,7 +13,7 @@
   "metadata": {
     "description": "Java Bytecode",
     "host_tools": false,
-    "std": false,
+    "std": true,
     "tier": 3
   },
   "panic-strategy": "abort",

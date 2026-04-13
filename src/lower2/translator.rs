@@ -4,7 +4,7 @@ use super::{
         get_cast_instructions, get_load_instruction, get_operand_type, get_store_instruction,
         get_type_size, parse_jvm_descriptor_params,
     },
-    shim::get_shim_metadata,
+    shim::{get_shim_metadata, kotlin_shims_enabled},
 };
 use crate::oomir::{self, Type};
 
@@ -2033,9 +2033,11 @@ impl<'a, 'cp> FunctionTranslator<'a, 'cp> {
             } => {
                 let mut handled_as_shim = false;
                 let mut is_diverging_call = false;
+                let has_native_target = module.functions.contains_key(function_name);
 
                 // --- Shim Lookup using JSON metadata ---
-                match get_shim_metadata() {
+                if !has_native_target && kotlin_shims_enabled() {
+                    match get_shim_metadata() {
                     Ok(shim_map) => {
                         // Use the function_name (make_jvm_safe output) as the key.
                         // Some monomorphized closure names are path-stamped; normalize
@@ -2307,10 +2309,10 @@ impl<'a, 'cp> FunctionTranslator<'a, 'cp> {
                         );
                     }
                 } // End Shim Lookup
+                }
 
                 // --- Intra-Module Call (Fallback) ---
                 if !handled_as_shim {
-                    // This logic remains the same, using function_name for lookup
                     let target_func = module.functions.get(function_name).ok_or_else(|| {
                         jvm::Error::VerificationError {
                             context: format!("Function {}", self.oomir_func.name),
