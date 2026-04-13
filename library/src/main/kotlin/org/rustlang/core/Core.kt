@@ -135,6 +135,11 @@ public object Core {
     }
 
     @JvmStatic
+    public fun Command_arg_Object(commandObj: Any?, arg: Any?): Any? {
+        return Command_arg_str(commandObj, arg?.toString() ?: "")
+    }
+
+    @JvmStatic
     public fun Command_arg_str(commandObj: Any?, arg: String): Any? {
         if (commandObj is ProcessBuilder) {
             val args = commandObj.command().toMutableList()
@@ -146,11 +151,72 @@ public object Core {
     }
 
     @JvmStatic
+    public fun Command_env_remove_str(commandObj: Any?, key: String): Any? {
+        if (commandObj is ProcessBuilder) {
+            commandObj.environment().remove(key)
+        }
+        return commandObj
+    }
+
+    @JvmStatic
+    public fun Command_args(commandObj: Any?, argsObj: Any?): Any? {
+        if (commandObj !is ProcessBuilder) {
+            return commandObj
+        }
+
+        val iterator = when (argsObj) {
+            is Iterator<*> -> argsObj
+            is Iterable<*> -> argsObj.iterator()
+            null -> emptyList<Any?>().iterator()
+            else -> listOf(argsObj).iterator()
+        }
+
+        val args = commandObj.command().toMutableList()
+        while (iterator.hasNext()) {
+            args.add(iterator.next()?.toString() ?: "")
+        }
+        commandObj.command(args)
+        return commandObj
+    }
+
+    @JvmStatic
+    public fun Command_stderr_Stdio(commandObj: Any?, _stdio: Any?): Any? {
+        if (commandObj is ProcessBuilder) {
+            commandObj.redirectError(ProcessBuilder.Redirect.PIPE)
+        }
+        return commandObj
+    }
+
+    @JvmStatic
+    public fun Command_stdout_Stdio(commandObj: Any?, _stdio: Any?): Any? {
+        if (commandObj is ProcessBuilder) {
+            commandObj.redirectOutput(ProcessBuilder.Redirect.PIPE)
+        }
+        return commandObj
+    }
+
+    @JvmStatic
+    public fun Command_stdin_Stdio(commandObj: Any?, _stdio: Any?): Any? {
+        if (commandObj is ProcessBuilder) {
+            commandObj.redirectInput(ProcessBuilder.Redirect.PIPE)
+        }
+        return commandObj
+    }
+
+    @JvmStatic
     public fun Command_output(commandObj: Any?): Any? {
         if (commandObj !is ProcessBuilder) {
             return null
         }
         return commandObj.start()
+    }
+
+    @JvmStatic
+    public fun Command_status(commandObj: Any?): Any? {
+        if (commandObj !is ProcessBuilder) {
+            return null
+        }
+        return commandObj.start().waitFor()
     }
 
     @JvmStatic
@@ -169,9 +235,47 @@ public object Core {
     }
 
     @JvmStatic
+    public fun Path_display(pathObj: Any?): String {
+        return pathObj?.toString() ?: ""
+    }
+
+    @JvmStatic
+    public fun Path_join_str(pathObj: Any?, segment: String): String {
+        val base = pathObj?.toString() ?: ""
+        if (base.isEmpty()) return segment
+        return java.nio.file.Paths.get(base).resolve(segment).toString()
+    }
+
+    @JvmStatic
+    public fun Path_with_extension_str(pathObj: Any?, extension: String): String {
+        val path = java.nio.file.Paths.get(pathObj?.toString() ?: "")
+        val fileName = path.fileName?.toString() ?: ""
+        val stem = fileName.substringBeforeLast('.', fileName)
+        val parent = path.parent
+        val normalizedExt = extension.trimStart('.')
+        val newName = if (normalizedExt.isEmpty()) stem else "$stem.$normalizedExt"
+        return if (parent != null) parent.resolve(newName).toString() else newName
+    }
+
+    @JvmStatic
     public fun Option_OsString_branch(optionObj: Any?): Any? {
         // Keep Option payload shape intact; callers can continue matching on variants.
         return optionObj
+    }
+
+    @JvmStatic
+    public fun Option_str_branch(optionObj: Any?): Any? {
+        return optionObj
+    }
+
+    @JvmStatic
+    public fun Option_str_ne(a: Any?, b: Any?): Boolean {
+        return a != b
+    }
+
+    @JvmStatic
+    public fun Option_i32_eq(a: Any?, b: Any?): Boolean {
+        return a == b
     }
 
     @JvmStatic
@@ -207,6 +311,16 @@ public object Core {
     }
 
     @JvmStatic
+    public fun Option_OsString_into_iter(optionObj: Any?): Any? {
+        val value = Option_unwrap(optionObj)
+        return if (Option_is_none(optionObj)) {
+            emptyList<Any?>().iterator()
+        } else {
+            listOf(value).iterator()
+        }
+    }
+
+    @JvmStatic
     public fun Option_OsString_filter_closure(_captured: Any?, value: Any?): Boolean {
         return value?.toString()?.isNotEmpty() ?: false
     }
@@ -235,6 +349,26 @@ public object Core {
     }
 
     @JvmStatic
+    public fun Result_str_Utf8Error_ok(resultObj: Any?): Any? {
+        return resultObj
+    }
+
+    @JvmStatic
+    public fun Result_u32_ParseIntError_ok(resultObj: Any?): Any? {
+        return resultObj
+    }
+
+    @JvmStatic
+    public fun Stdio_null(): Any? {
+        return null
+    }
+
+    @JvmStatic
+    public fun String_is_empty(value: String): Boolean {
+        return value.isEmpty()
+    }
+
+    @JvmStatic
     public fun Result_String_VarError_unwrap_or_default(resultObj: Any?): String {
         if (resultObj == null) {
             return ""
@@ -258,6 +392,25 @@ public object Core {
     @JvmStatic
     public fun Option_u32_from_residual(residual: Any?): Any? {
         return residual
+    }
+
+    @JvmStatic
+    public fun ErrorKind_ne(a: Any?, b: Any?): Boolean {
+        return a != b
+    }
+
+    @JvmStatic
+    public fun ErrorKind_eq(a: Any?, b: Any?): Boolean {
+        return a == b
+    }
+
+    @JvmStatic
+    public fun ExitStatus_success(status: Any?): Boolean {
+        return when (status) {
+            is Int -> status == 0
+            is Number -> status.toInt() == 0
+            else -> false
+        }
     }
 
     @JvmStatic
@@ -291,13 +444,122 @@ public object Core {
     }
 
     @JvmStatic
+    public fun from_utf8(bytesObj: Any?): Any? {
+        return try {
+            when (bytesObj) {
+                is ByteArray -> String(bytesObj, Charsets.UTF_8)
+                is ShortArray -> String(bytesObj.map { (it.toInt() and 0xFF).toByte() }.toByteArray(), Charsets.UTF_8)
+                is IntArray -> String(bytesObj.map { (it and 0xFF).toByte() }.toByteArray(), Charsets.UTF_8)
+                is String -> bytesObj
+                else -> bytesObj?.toString()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    @JvmStatic
     public fun std_fs_read_to_string_str(path: String): String {
         return Files.readString(Path.of(path))
     }
 
     @JvmStatic
+    public fun std_io_Error_kind(errorObj: Any?): Any? {
+        return errorObj
+    }
+
+    @JvmStatic
+    public fun std_io_Error_raw_os_error(_errorObj: Any?): Any? {
+        return null
+    }
+
+    @JvmStatic
+    public fun std_io_eprint(args: Any?) {
+        System.err.print(args?.toString() ?: "")
+    }
+
+    @JvmStatic
+    public fun exit(code: Int) {
+        throw RuntimeException("process::exit($code)")
+    }
+
+    @JvmStatic
+    public fun std_str_Split_char_next(splitObj: Any?): Any? {
+        val iterator = splitObj as? Iterator<*>
+        return if (iterator != null && iterator.hasNext()) iterator.next() else null
+    }
+
+    @JvmStatic
+    public fun std_str_Split_char_into_iter(splitObj: Any?): Any? {
+        return splitObj
+    }
+
+    @JvmStatic
+    public fun once_OsString(value: Any?): Any? {
+        return listOf(value).iterator()
+    }
+
+    @JvmStatic
+    public fun iterator_next(iteratorObj: Any?): Any? {
+        val iterator = iteratorObj as? Iterator<*>
+        return if (iterator != null && iterator.hasNext()) iterator.next() else null
+    }
+
+    @JvmStatic
+    public fun iterator_chain(left: Any?, right: Any?): Any? {
+        fun toIterator(value: Any?): Iterator<Any?> = when (value) {
+            null -> emptyList<Any?>().iterator()
+            is Iterator<*> -> value as Iterator<Any?>
+            is Iterable<*> -> value.iterator() as Iterator<Any?>
+            else -> listOf(value).iterator()
+        }
+
+        return sequence {
+            yieldAll(toIterator(left).asSequence())
+            yieldAll(toIterator(right).asSequence())
+        }.iterator()
+    }
+
+    @JvmStatic
+    public fun std_option_IntoIter_OsString_as_Iterator_chain_Option_OsString(
+        left: Any?,
+        right: Any?,
+    ): Any? {
+        fun toIterator(value: Any?): Iterator<Any?> = when (value) {
+            null -> emptyList<Any?>().iterator()
+            is Iterator<*> -> value as Iterator<Any?>
+            is Iterable<*> -> value.iterator() as Iterator<Any?>
+            else -> listOf(value).iterator()
+        }
+
+        val chained = sequence {
+            yieldAll(toIterator(left).asSequence())
+            yieldAll(toIterator(right).asSequence())
+        }
+        return chained.iterator()
+    }
+
+    @JvmStatic
     public fun PathBuf_from(pathLike: Any?): String {
         return pathLike?.toString() ?: ""
+    }
+
+    @JvmStatic
+    public fun create_dir_PathBuf(pathObj: Any?): Any? {
+        val path = Path.of(pathObj?.toString() ?: "")
+        Files.createDirectories(path)
+        return null
+    }
+
+    @JvmStatic
+    public fun remove_dir_all_PathBuf(pathObj: Any?): Any? {
+        val path = Path.of(pathObj?.toString() ?: "")
+        if (Files.exists(path)) {
+            Files.walk(path)
+                .sorted(Comparator.reverseOrder())
+                .forEach { Files.deleteIfExists(it) }
+        }
+        return null
     }
 
     @JvmStatic
