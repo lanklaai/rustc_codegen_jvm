@@ -22,6 +22,24 @@ This ordering matters because `std` will otherwise hide whether failures come fr
 - `jvm_no_std` is the first real-`core` compile probe.
 - `jvm_alloc` is the first real-`alloc` compile probe with an explicit local allocator surface.
 
+## Progress so far
+
+- Added the external probe crate and wired it to the generated backend configuration.
+- Confirmed the old host-target path still has a real upstream-call gap: external `core` functions are not yet treated as first-class cross-crate calls.
+- Moved the custom target past the frontend ABI-lowering ICE by reporting a supported 32-bit `arch` in the target template while keeping the JVM linker/backend flow.
+- Fixed three backend issues that blocked early sysroot bringup:
+  - direct MIR reads now use `instance_mir`
+  - pointer-sized integer constants no longer assume 64-bit width
+  - impl-item scanning now skips associated consts and other non-function impl items
+- Fixed several newer sysroot-lowering crashes in the backend:
+  - `f128` constants no longer panic on `INFINITY`, `NEG_INFINITY`, or `NAN`; they lower to bringup-only `BigDecimal` sentinels instead
+  - trait-item scanning now skips associated types and consts instead of assuming every trait item is a function
+  - trait wrapper generation no longer assumes a first argument exists for every method helper
+  - scalar-backed transparent wrappers now unwrap recursively during constant lowering, including `NonZero*`-style nested wrappers
+  - zero-field scalar wrapper constants now degrade to empty constant instances instead of aborting
+  - type lowering now uses fallible normalization and preserves unresolved aliases instead of crashing immediately on projection types
+- Real `core` compilation now gets substantially farther and reaches backend lowering of sysroot crates.
+
 ## Execution plan
 
 ### Phase 1: establish failing baselines
@@ -41,6 +59,16 @@ Capture the first failure in each stage before changing backend code.
 4. Decide which existing Kotlin helpers stay as runtime support versus which must disappear once `core` is native.
 5. Add a regression command for `jvm_no_std` once the first `core` build passes.
 
+## Immediate next steps
+
+1. Fix the next remaining `core` constant-lowering crash in [`src/lower1/operand.rs`](../src/lower1/operand.rs); the latest `jvm_no_std` run still finds additional scalar-backed wrapper shapes after the `f128` and `NonZero*` paths were removed.
+2. Remove the remaining `compiler_builtins` normalization ICE around `float::traits::Float::Int` and similar projection types; the backend still hits a hard `normalize_erasing_regions` failure in generic float/int support code.
+3. Decide how `f16` and `f128` should be represented on the JVM side during bringup:
+   either lower them to runtime helper objects consistently, or gate unsupported constant cases cleanly instead of relying on bringup-only sentinel encodings.
+4. Audit all remaining places that still assume full type normalization succeeds, especially in generic sysroot code paths that reference associated types or projection aliases.
+5. Start the cross-crate call model work after the current sysroot-lowering crashes are removed:
+   upstream functions from `core` and `compiler_builtins` need real owner/class resolution instead of shim-name fallback.
+
 ### Phase 3: get real `alloc` compiling
 
 1. Define the allocator contract for the JVM target.
@@ -55,6 +83,13 @@ Capture the first failure in each stage before changing backend code.
 1. Inventory remaining OS/runtime assumptions: threads, fs, env, io, time, process, and unwinding.
 2. Split `std` work into "portable pure-Rust pieces" versus "JVM runtime bindings".
 3. Only start here after `core` and `alloc` are compiling without the Kotlin shim standing in for them.
+
+## Current blocker snapshot
+
+- `jvm_no_std` now reaches backend lowering for real `core`.
+- The original `f128` constant panic is gone, but `core` still has at least one later constant-lowering panic in [`src/lower1/operand.rs`](../src/lower1/operand.rs) around additional scalar-backed wrapper shapes.
+- `compiler_builtins` still fails in generic float support code, currently surfacing as a `normalize_erasing_regions` ICE around `float::traits::Float::Int` projection types.
+- `jvm_alloc` has not been usefully exercised yet because `core` is not compiling cleanly enough to move on.
 
 ## Expected first blockers
 

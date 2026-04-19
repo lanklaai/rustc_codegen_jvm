@@ -625,31 +625,41 @@ impl CodegenBackend for MyBackend {
 
                     let mut to_call_invokevirtual_on = "_1".to_string();
 
-                    if let oomir::Operand::Variable { ty, .. } = &args[0] {
-                        // &mut self
-                        if ty
-                            == &oomir::Type::MutableReference(Box::new(oomir::Type::Class(
-                                ident.clone(),
-                            )))
-                        {
-                            instructions.push(oomir::Instruction::Cast {
-                                op: Operand::Variable {
-                                    name: "_1".into(),
-                                    ty: Type::MutableReference(Box::new(Type::Class(
-                                        ident.clone(),
-                                    ))),
-                                },
-                                ty: Type::Class(ident.clone()),
-                                dest: "_1_mutderef".into(),
-                            });
-                            to_call_invokevirtual_on = "_1_mutderef".to_string();
-                        } else if *ty != oomir::Type::Class(ident.clone()) {
+                    match args.first() {
+                        Some(oomir::Operand::Variable { ty, .. }) => {
+                            // &mut self
+                            if ty
+                                == &oomir::Type::MutableReference(Box::new(oomir::Type::Class(
+                                    ident.clone(),
+                                )))
+                            {
+                                instructions.push(oomir::Instruction::Cast {
+                                    op: Operand::Variable {
+                                        name: "_1".into(),
+                                        ty: Type::MutableReference(Box::new(Type::Class(
+                                            ident.clone(),
+                                        ))),
+                                    },
+                                    ty: Type::Class(ident.clone()),
+                                    dest: "_1_mutderef".into(),
+                                });
+                                to_call_invokevirtual_on = "_1_mutderef".to_string();
+                            } else if *ty != oomir::Type::Class(ident.clone()) {
+                                instructions.push(oomir::Instruction::ConstructObject {
+                                    dest: "_1_instance".into(),
+                                    class_name: ident.clone(),
+                                });
+                                to_call_invokevirtual_on = "_1_instance".into();
+                            }
+                        }
+                        None => {
                             instructions.push(oomir::Instruction::ConstructObject {
-                                dest: "_1_instance".into(),
+                                dest: "_0_instance".into(),
                                 class_name: ident.clone(),
                             });
-                            to_call_invokevirtual_on = "_1_instance".into();
+                            to_call_invokevirtual_on = "_0_instance".into();
                         }
+                        _ => {}
                     }
 
                     instructions.extend(vec![
@@ -787,6 +797,21 @@ impl CodegenBackend for MyBackend {
                 let mut fn_data = HashMap::new();
                 let mut new_functions = HashMap::new();
                 for item in item_refs {
+                    let trait_item =
+                        tcx.hir_trait_item(rustc_hir::TraitItemId { owner_id: item.owner_id });
+                    if !matches!(trait_item.kind, rustc_hir::TraitItemKind::Fn(..)) {
+                        breadcrumbs::log!(
+                            breadcrumbs::LogLevel::Info,
+                            "backend",
+                            format!(
+                                "Skipping non-function trait item {} (DefId: {:?})",
+                                trait_item.ident,
+                                item.owner_id.to_def_id()
+                            )
+                        );
+                        continue;
+                    }
+
                     let name = item.to_ident(tcx).as_str().to_string();
                     let def_id = item.owner_id.to_def_id(); // Get the DefId of the trait item (e.g., get_number)
                     let mir_sig = tcx.type_of(def_id).skip_binder().fn_sig(tcx);

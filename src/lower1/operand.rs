@@ -21,6 +21,125 @@ mod float;
 use experimental::read_constant_value_from_memory;
 use float::f128_to_string;
 
+const F128_NAN_SENTINEL: &str = "2E7000";
+const F128_POS_INFINITY_SENTINEL: &str = "1E7000";
+const F128_NEG_INFINITY_SENTINEL: &str = "-1E7000";
+
+fn f128_constant_to_bigdecimal_constant(val: f128) -> oomir::Constant {
+    // During sysroot bringup we still model f128 as BigDecimal. BigDecimal cannot
+    // represent NaN or infinities, so encode those as out-of-range finite sentinels
+    // that cannot collide with any real binary128 value.
+    let decimal = if val.is_nan() {
+        F128_NAN_SENTINEL.to_string()
+    } else if val.is_infinite() {
+        if val.is_sign_negative() {
+            F128_NEG_INFINITY_SENTINEL.to_string()
+        } else {
+            F128_POS_INFINITY_SENTINEL.to_string()
+        }
+    } else {
+        f128_to_string(val)
+    };
+
+    oomir::Constant::Instance {
+        class_name: "java/math/BigDecimal".into(),
+        fields: HashMap::new(),
+        params: vec![oomir::Constant::String(decimal)],
+    }
+}
+
+fn scalar_int_to_wrapped_constant<'tcx>(
+    scalar_int: ScalarInt,
+    ty: &Ty<'tcx>,
+    tcx: TyCtxt<'tcx>,
+    data_types: &mut HashMap<String, oomir::DataType>,
+    instance: Instance<'tcx>,
+) -> oomir::Constant {
+    match ty.kind() {
+        TyKind::Adt(adt_def, substs) => {
+            let adt_name = match ty_to_oomir_type(*ty, tcx, data_types, instance) {
+                oomir::Type::Class(class_name) => class_name,
+                _ => panic!("Expected a class type for ADT, but got: {:?}", ty),
+            };
+
+            let variant = adt_def
+                .variants()
+                .iter()
+                .next()
+                .expect("Transparent ADT should have one variant");
+
+            let non_zst_fields: Vec<_> = variant
+                .fields
+                .iter()
+                .filter(|field_def| {
+                    !tcx.layout_of(PseudoCanonicalInput {
+                        typing_env: TypingEnv::post_analysis(tcx, field_def.did),
+                        value: field_def.ty(tcx, substs),
+                    })
+                    .map(|layout| layout.is_zst())
+                    .unwrap_or(false)
+                })
+                .collect();
+
+            if non_zst_fields.is_empty() {
+                breadcrumbs::log!(
+                    breadcrumbs::LogLevel::Warn,
+                    "const-eval",
+                    format!(
+                        "Info: Treating zero-sized scalar-backed ADT {:?} as an empty constant instance",
+                        ty
+                    )
+                );
+                return oomir::Constant::Instance {
+                    class_name: adt_name,
+                    fields: HashMap::new(),
+                    params: vec![],
+                };
+            }
+
+            if non_zst_fields.len() != 1 {
+                panic!(
+                    "Transparent ADT {:?} does not have exactly one non-ZST field, but was represented as ScalarInt. Fields: {}",
+                    ty,
+                    non_zst_fields.len()
+                );
+            }
+
+            let field_def = non_zst_fields[0];
+            let field_name = field_def.ident(tcx).name;
+            let field_ty = field_def.ty(tcx, substs);
+            let normalized_field_ty = tcx
+                .try_normalize_erasing_regions(TypingEnv::post_analysis(tcx, field_def.did), field_ty)
+                .unwrap_or(field_ty);
+
+            breadcrumbs::log!(
+                breadcrumbs::LogLevel::Info,
+                "const-eval",
+                format!(
+                    "Info: Unwrapping transparent ADT {:?} to its scalar-backed field type {:?} for ScalarInt constant",
+                    ty, normalized_field_ty
+                )
+            );
+
+            let const_inner = scalar_int_to_wrapped_constant(
+                scalar_int,
+                &normalized_field_ty,
+                tcx,
+                data_types,
+                instance,
+            );
+            let mut hm = HashMap::new();
+            hm.insert(field_name.to_string(), const_inner);
+            oomir::Constant::Instance {
+                class_name: adt_name,
+                fields: hm,
+                params: vec![],
+            }
+        }
+        _ => scalar_int_to_oomir_constant(scalar_int, ty),
+    }
+}
+
 /// Convert a MIR operand to an OOMIR operand.
 pub fn convert_operand<'tcx>(
     mir_op: &MirOperand<'tcx>,
@@ -165,7 +284,7 @@ pub fn handle_const_value<'tcx>(
                     let final_scalar_int = scalar_int;
 
                     // Check for and unwrap transparent ADTs that wrap a single scalar
-                    if let TyKind::Adt(adt_def, substs) = current_ty.kind() {
+                    if let TyKind::Adt(_, _) = current_ty.kind() {
                         // ensure that the ADT gets added to the data_types map (ty_to_oomir_type does this implicitly)
                         breadcrumbs::log!(breadcrumbs::LogLevel::Info, "const-eval", "138138138");
                         let adt_name = match ty_to_oomir_type(*ty, tcx, data_types, instance) {
@@ -182,69 +301,14 @@ pub fn handle_const_value<'tcx>(
                                 adt_name, scalar_int
                             )
                         );
-                        // A transparent struct should have one variant
-                        let variant = adt_def
-                            .variants()
-                            .iter()
-                            .next()
-                            .expect("Transparent ADT should have one variant");
-
-                        // Find the single non-ZST field
-                        let non_zst_fields: Vec<_> = variant
-                            .fields
-                            .iter()
-                            .filter(|field_def| {
-                                !tcx.layout_of(PseudoCanonicalInput {
-                                    typing_env: TypingEnv::post_analysis(tcx, field_def.did),
-                                    value: field_def.ty(tcx, substs),
-                                })
-                                .map(|layout| layout.is_zst())
-                                .unwrap_or(false)
-                            })
-                            .collect();
-
-                        if non_zst_fields.len() == 1 {
-                            let field_def = non_zst_fields[0];
-                            let field_name = field_def.ident(tcx).name;
-                            let field_ty = field_def.ty(tcx, substs);
-
-                            // Check if this field itself is a scalar that ScalarInt can represent
-                            // This check might be implicit if field_ty is directly usable by scalar_int_to_oomir_constant
-                            if field_ty.is_scalar() || field_ty.is_bool() || field_ty.is_char() {
-                                // Add more conditions if necessary
-                                breadcrumbs::log!(
-                                    breadcrumbs::LogLevel::Info,
-                                    "const-eval",
-                                    format!(
-                                        "Info: Unwrapping transparent ADT {:?} to its scalar field type {:?} for ScalarInt constant",
-                                        current_ty, field_ty
-                                    )
-                                );
-                                let const_inner =
-                                    scalar_int_to_oomir_constant(scalar_int, &field_ty);
-                                let mut hm = HashMap::new();
-                                hm.insert(field_name.to_string(), const_inner);
-                                oomir::Operand::Constant(oomir::Constant::Instance {
-                                    class_name: adt_name,
-                                    fields: hm,
-                                    params: vec![],
-                                })
-                            } else {
-                                // Transparent ADT wraps a non-scalar or complex type.
-                                panic!(
-                                    "Transparent ADT {:?} wraps a non-primitive field {:?}. ScalarInt representation is unusual.",
-                                    ty, field_ty
-                                );
-                            }
-                        } else {
-                            // Transparent ADT with zero or multiple non-ZST fields.
-                            // This is ill-formed for #[repr(transparent)] or unexpected for ScalarInt.
-                            panic!(
-                                "Transparent ADT {:?} does not have exactly one non-ZST field, but was represented as ScalarInt. Fields: {}",
-                                ty,
-                                non_zst_fields.len()
-                            );
-                        }
+                        let const_value = scalar_int_to_wrapped_constant(
+                            scalar_int,
+                            &current_ty,
+                            tcx,
+                            data_types,
+                            instance,
+                        );
+                        oomir::Operand::Constant(const_value)
                     } else {
                         let oomir_const =
                             scalar_int_to_oomir_constant(final_scalar_int, &current_ty);
@@ -1565,22 +1629,7 @@ fn scalar_int_to_oomir_constant(scalar_int: ScalarInt, ty: &Ty<'_>) -> oomir::Co
                 let bits: u128 = scalar_int.to_u128();
                 // 2. Reinterpret as f128
                 let val: f128 = f128::from_bits(bits);
-
-                // 3. Special‑case NaN & ±∞ before we try to format them:
-                if val.is_nan() {
-                    panic!("Attempt to store NaN as a constant BigDecimal/F128 (impossible).");
-                } else if val.is_infinite() {
-                    panic!("Attempt to store ±∞ as a constant BigDecimal/F128 (impossible).");
-                } else {
-                    // 4. Normal finite values → decimal string → BigDecimal
-                    let s = f128_to_string(val);
-                    let param = oomir::Constant::String(s);
-                    oomir::Constant::Instance {
-                        class_name: "java/math/BigDecimal".into(),
-                        fields: HashMap::new(),
-                        params: vec![param],
-                    }
-                }
+                f128_constant_to_bigdecimal_constant(val)
             }
         },
         TyKind::Str => {

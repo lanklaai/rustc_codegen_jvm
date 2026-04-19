@@ -15,11 +15,23 @@ pub fn ty_to_oomir_type<'tcx>(
     data_types: &mut HashMap<String, oomir::DataType>,
     instance_context: rustc_middle::ty::Instance<'tcx>,
 ) -> oomir::Type {
-    let resolved_ty = tcx.instantiate_and_normalize_erasing_regions(
-        instance_context.args,
-        TypingEnv::fully_monomorphized(),
-        rustc_middle::ty::EarlyBinder::bind(ty),
-    );
+    let resolved_ty = tcx
+        .try_instantiate_and_normalize_erasing_regions(
+            instance_context.args,
+            TypingEnv::fully_monomorphized(),
+            rustc_middle::ty::EarlyBinder::bind(ty),
+        )
+        .unwrap_or_else(|_| {
+            breadcrumbs::log!(
+                breadcrumbs::LogLevel::Warn,
+                "type-mapping",
+                format!(
+                    "Falling back to unnormalized type mapping for {:?} in instance {:?}",
+                    ty, instance_context
+                )
+            );
+            ty
+        });
     match resolved_ty.kind() {
         rustc_middle::ty::TyKind::Bool => oomir::Type::Boolean,
         rustc_middle::ty::TyKind::Char => oomir::Type::Char,
@@ -314,6 +326,10 @@ pub fn ty_to_oomir_type<'tcx>(
         }
         rustc_middle::ty::TyKind::Param(param_ty) => {
             oomir::Type::Class(make_jvm_safe(param_ty.name.as_str()))
+        }
+        rustc_middle::ty::TyKind::Alias(_, alias_ty) => {
+            let alias_name = tcx.def_path_str(alias_ty.def_id);
+            oomir::Type::Class(make_jvm_safe(&alias_name).replace("::", "/"))
         }
         rustc_middle::ty::TyKind::Closure(def_id, _substs) => {
             // Closures are lowered to separate functions, so the closure object itself
