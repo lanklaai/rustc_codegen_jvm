@@ -343,6 +343,17 @@ pub fn ty_to_oomir_type<'tcx>(
             );
             oomir::Type::Class("java/lang/Object".to_string())
         }
+        rustc_middle::ty::TyKind::FnPtr(..) | rustc_middle::ty::TyKind::FnDef(..) => {
+            breadcrumbs::log!(
+                breadcrumbs::LogLevel::Warn,
+                "type-mapping",
+                format!(
+                    "Erasing function-pointer-like type {:?} to java/lang/Object during JVM bringup",
+                    ty
+                )
+            );
+            oomir::Type::Class("java/lang/Object".to_string())
+        }
         _ => {
             breadcrumbs::log!(
                 breadcrumbs::LogLevel::Warn,

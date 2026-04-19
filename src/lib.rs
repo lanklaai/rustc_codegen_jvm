@@ -34,7 +34,7 @@ use rustc_data_structures::fx::FxIndexMap;
 use rustc_hir::{QPath, TyKind as HirTyKind};
 use rustc_metadata::EncodedMetadata;
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
-use rustc_middle::ty::TyCtxt;
+use rustc_middle::ty::{TyCtxt, TypeVisitableExt};
 use rustc_session::{Session, config::OutputFilenames};
 use std::{any::Any, io::Write, path::Path};
 
@@ -118,6 +118,40 @@ fn lower_closure_to_oomir<'tcx>(
     oomir_module.merge_data_types(&data_types);
 }
 
+fn should_skip_discovered_instance<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    instance: rustc_middle::ty::Instance<'tcx>,
+) -> Option<String> {
+    match instance.def {
+        rustc_middle::ty::InstanceKind::Virtual(_, _) => {
+            return Some("virtual dispatch is handled at runtime".to_string());
+        }
+        rustc_middle::ty::InstanceKind::Intrinsic(def_id) => {
+            return Some(format!(
+                "intrinsic instance {} requires special lowering",
+                tcx.def_path_str(def_id)
+            ));
+        }
+        _ => {}
+    }
+
+    if instance.args.has_non_region_param() {
+        return Some(format!(
+            "instance still has unresolved generic parameters: {:?}",
+            instance.args
+        ));
+    }
+
+    if instance.args.has_aliases() {
+        return Some(format!(
+            "instance still has unresolved projection aliases: {:?}",
+            instance.args
+        ));
+    }
+
+    None
+}
+
 impl CodegenBackend for MyBackend {
     fn locale_resource(&self) -> &'static str {
         ""
@@ -162,6 +196,15 @@ impl CodegenBackend for MyBackend {
             {
                 let def_id = item_id.owner_id.to_def_id();
 
+                if tcx.is_foreign_item(def_id) {
+                    breadcrumbs::log!(
+                        breadcrumbs::LogLevel::Info,
+                        "backend",
+                        format!("Skipping foreign function item {}", i)
+                    );
+                    continue;
+                }
+
                 // Skip directly lowering generic functions; collect concrete instantiations instead
                 let generics = tcx.generics_of(def_id);
                 if !generics.own_params.is_empty() {
@@ -176,7 +219,28 @@ impl CodegenBackend for MyBackend {
                     continue;
                 }
 
+                let item_ty = tcx.type_of(def_id).instantiate_identity();
+                if item_ty.has_aliases() {
+                    breadcrumbs::log!(
+                        breadcrumbs::LogLevel::Info,
+                        "backend",
+                        format!(
+                            "Skipping direct lowering of function {} because its signature still contains aliases: {:?}",
+                            i, item_ty
+                        )
+                    );
+                    continue;
+                }
+
                 let instance = rustc_middle::ty::Instance::mono(tcx, def_id);
+                if let Some(reason) = should_skip_discovered_instance(tcx, instance) {
+                    breadcrumbs::log!(
+                        breadcrumbs::LogLevel::Info,
+                        "backend",
+                        format!("Skipping direct lowering of function {}: {}", i, reason)
+                    );
+                    continue;
+                }
                 let mut mir = tcx.instance_mir(instance.def).clone(); // Clone the MIR
 
                 breadcrumbs::log!(
@@ -227,16 +291,15 @@ impl CodegenBackend for MyBackend {
                                             *fn_args,
                                             rustc_span::DUMMY_SP,
                                         );
-                                        // Skip virtual trait method calls (handled via trait objects at runtime)
-                                        if let rustc_middle::ty::InstanceKind::Virtual(_, _) =
-                                            instance.def
+                                        if let Some(reason) =
+                                            should_skip_discovered_instance(tcx, instance)
                                         {
                                             breadcrumbs::log!(
                                                 breadcrumbs::LogLevel::Info,
                                                 "backend",
                                                 format!(
-                                                    "Skipping virtual instance: {:?}",
-                                                    instance
+                                                    "Skipping discovered instance {:?}: {}",
+                                                    instance, reason
                                                 )
                                             );
                                             continue;
@@ -310,33 +373,57 @@ impl CodegenBackend for MyBackend {
                     );
                     continue; // Skip to the next item in the crate
                 }
-                let ident = match impl_a.self_ty.kind {
-                    HirTyKind::Path(qpath) => match qpath {
-                        QPath::Resolved(_, p) => {
-                            format!("{}", p.segments[0].ident)
-                        }
-                        QPath::TypeRelative(_, ps) => {
-                            format!("{}", ps.ident)
-                        }
-                        _ => {
+                let ident = {
+                    let mut tmp_data_types = HashMap::new();
+                    let impl_self_ty = tcx.type_of(impl_def_id).instantiate_identity();
+                    match lower1::types::ty_to_oomir_type(
+                        impl_self_ty,
+                        tcx,
+                        &mut tmp_data_types,
+                        rustc_middle::ty::Instance::new_raw(
+                            impl_def_id,
+                            rustc_middle::ty::GenericArgs::identity_for_item(tcx, impl_def_id),
+                        ),
+                    ) {
+                        Type::Class(name) => name,
+                        Type::MutableReference(inner) => match *inner {
+                            Type::Class(name) => name,
+                            other => {
+                                breadcrumbs::log!(
+                                    breadcrumbs::LogLevel::Warn,
+                                    "backend",
+                                    format!(
+                                        "Warning: unexpected impl receiver reference type {:?} for {:?}",
+                                        other, impl_self_ty
+                                    )
+                                );
+                                lower1::place::make_jvm_safe(&format!("{:?}", other))
+                            }
+                        },
+                        other => {
                             breadcrumbs::log!(
                                 breadcrumbs::LogLevel::Warn,
                                 "backend",
-                                format!("Warning: {:?} is an unknown qpath", qpath)
+                                format!(
+                                    "Warning: unexpected impl receiver type {:?} for {:?}",
+                                    other, impl_self_ty
+                                )
                             );
-                            "unknown_qpath_kind".into()
+                            match impl_a.self_ty.kind {
+                                HirTyKind::Path(qpath) => match qpath {
+                                    QPath::Resolved(_, p) => {
+                                        lower1::place::make_jvm_safe(&p.segments[0].ident.to_string())
+                                    }
+                                    QPath::TypeRelative(_, ps) => {
+                                        lower1::place::make_jvm_safe(&ps.ident.to_string())
+                                    }
+                                    _ => "unknown_qpath_kind".into(),
+                                },
+                                _ => "unknown_type_kind".into(),
+                            }
                         }
-                    },
-                    _ => {
-                        breadcrumbs::log!(
-                            breadcrumbs::LogLevel::Warn,
-                            "backend",
-                            format!("Warning: {:?} has unknown kind", impl_a.self_ty)
-                        );
-                        "unknown_type_kind".into()
                     }
                 };
-                let ident = lower1::place::make_jvm_safe(&ident);
                 let of_trait = match impl_a.of_trait {
                     Some(trait_impl_header) => Some(lower1::place::make_jvm_safe(
                         trait_impl_header
@@ -369,6 +456,15 @@ impl CodegenBackend for MyBackend {
                     let i = item.to_ident(tcx).to_string();
                     let def_id = item.owner_id.to_def_id();
 
+                    if tcx.is_foreign_item(def_id) {
+                        breadcrumbs::log!(
+                            breadcrumbs::LogLevel::Info,
+                            "backend",
+                            format!("Skipping foreign impl method {}", i)
+                        );
+                        continue;
+                    }
+
                     // Skip direct lowering of generic methods; rely on monomorphized uses
                     let generics = tcx.generics_of(def_id);
                     if !generics.own_params.is_empty() {
@@ -383,7 +479,28 @@ impl CodegenBackend for MyBackend {
                         continue;
                     }
 
+                    let item_ty = tcx.type_of(def_id).instantiate_identity();
+                    if item_ty.has_aliases() {
+                        breadcrumbs::log!(
+                            breadcrumbs::LogLevel::Info,
+                            "backend",
+                            format!(
+                                "Skipping direct lowering of impl method {} because its signature still contains aliases: {:?}",
+                                i, item_ty
+                            )
+                        );
+                        continue;
+                    }
+
                     let instance = rustc_middle::ty::Instance::mono(tcx, def_id);
+                    if let Some(reason) = should_skip_discovered_instance(tcx, instance) {
+                        breadcrumbs::log!(
+                            breadcrumbs::LogLevel::Info,
+                            "backend",
+                            format!("Skipping direct lowering of impl method {}: {}", i, reason)
+                        );
+                        continue;
+                    }
                     let mut mir = tcx.instance_mir(instance.def).clone(); // Clone the MIR
 
                     let i2 = format!("{}_{}", ident, i);
@@ -433,16 +550,15 @@ impl CodegenBackend for MyBackend {
                                                     *fn_args,
                                                     rustc_span::DUMMY_SP,
                                                 );
-                                            // Skip virtual trait method calls (handled via trait objects at runtime)
-                                            if let rustc_middle::ty::InstanceKind::Virtual(_, _) =
-                                                instance.def
+                                            if let Some(reason) =
+                                                should_skip_discovered_instance(tcx, instance)
                                             {
                                                 breadcrumbs::log!(
                                                     breadcrumbs::LogLevel::Info,
                                                     "backend",
                                                     format!(
-                                                        "Skipping virtual instance: {:?}",
-                                                        instance
+                                                        "Skipping discovered instance {:?}: {}",
+                                                        instance, reason
                                                     )
                                                 );
                                                 continue;
@@ -793,6 +909,35 @@ impl CodegenBackend for MyBackend {
                     }
                 }
             } else if let rustc_hir::ItemKind::Trait(_, _, _, ident, _, _, item_refs) = item.kind {
+                let trait_generics = tcx.generics_of(item.owner_id.to_def_id());
+                if !trait_generics.own_params.is_empty() {
+                    breadcrumbs::log!(
+                        breadcrumbs::LogLevel::Info,
+                        "backend",
+                        format!(
+                            "Skipping trait {} because generic trait interface lowering is not supported during bringup",
+                            ident
+                        )
+                    );
+                    continue;
+                }
+
+                if item_refs.iter().any(|item| {
+                    let trait_item =
+                        tcx.hir_trait_item(rustc_hir::TraitItemId { owner_id: item.owner_id });
+                    !matches!(trait_item.kind, rustc_hir::TraitItemKind::Fn(..))
+                }) {
+                    breadcrumbs::log!(
+                        breadcrumbs::LogLevel::Info,
+                        "backend",
+                        format!(
+                            "Skipping trait {} because traits with associated items are not lowered during bringup",
+                            ident
+                        )
+                    );
+                    continue;
+                }
+
                 let ident = lower1::place::make_jvm_safe(ident.as_str());
                 let mut fn_data = HashMap::new();
                 let mut new_functions = HashMap::new();
@@ -814,6 +959,18 @@ impl CodegenBackend for MyBackend {
 
                     let name = item.to_ident(tcx).as_str().to_string();
                     let def_id = item.owner_id.to_def_id(); // Get the DefId of the trait item (e.g., get_number)
+                    let item_ty = tcx.type_of(def_id).instantiate_identity();
+                    if item_ty.has_aliases() {
+                        breadcrumbs::log!(
+                            breadcrumbs::LogLevel::Info,
+                            "backend",
+                            format!(
+                                "Skipping trait method {} because its signature still contains aliases: {:?}",
+                                name, item_ty
+                            )
+                        );
+                        continue;
+                    }
                     let mir_sig = tcx.type_of(def_id).skip_binder().fn_sig(tcx);
 
                     let params_ty = mir_sig.inputs();
@@ -925,6 +1082,17 @@ impl CodegenBackend for MyBackend {
 
         // Lower all discovered monomorphized function instances
         for (instance, name) in fn_instances_to_lower {
+            if let Some(reason) = should_skip_discovered_instance(tcx, instance) {
+                breadcrumbs::log!(
+                    breadcrumbs::LogLevel::Info,
+                    "mir-lowering",
+                    format!(
+                        "Skipping monomorphized function instance {} ({:?}): {}",
+                        name, instance, reason
+                    )
+                );
+                continue;
+            }
             let mut mir = tcx.instance_mir(instance.def).clone();
             breadcrumbs::log!(
                 breadcrumbs::LogLevel::Info,

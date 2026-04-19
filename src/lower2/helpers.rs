@@ -579,6 +579,7 @@ pub fn are_types_jvm_compatible(src: &oomir::Type, dest: &oomir::Type) -> bool {
         return true;
     }
     match (src, dest) {
+        (oomir::Type::Class(name), dest) if name == "java/lang/Object" && dest.is_jvm_reference_type() => true,
         // Allow storing smaller ints into I32 array slots if that's the JVM target type
         (
             oomir::Type::I8 | oomir::Type::I16 | oomir::Type::Boolean | oomir::Type::Char,

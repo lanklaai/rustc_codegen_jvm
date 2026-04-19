@@ -449,6 +449,7 @@ impl Operand {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
+    Null,
     I8(i8),
     I16(i16),
     I32(i32),
@@ -477,6 +478,7 @@ impl Eq for Constant {}
 impl std::hash::Hash for Constant {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
+            Constant::Null => 0u8.hash(state),
             Constant::I8(i) => i.hash(state),
             Constant::I16(i) => i.hash(state),
             Constant::I32(i) => i.hash(state),
@@ -525,6 +527,7 @@ impl Constant {
 
     pub fn is_zero(&self) -> bool {
         match self {
+            Constant::Null => false,
             Constant::I8(i) => *i == 0,
             Constant::I16(i) => *i == 0,
             Constant::I32(i) => *i == 0,
@@ -566,6 +569,7 @@ impl Constant {
 
     pub fn is_one(&self) -> bool {
         match self {
+            Constant::Null => false,
             Constant::I8(i) => *i == 1,
             Constant::I16(i) => *i == 1,
             Constant::I32(i) => *i == 1,
@@ -624,6 +628,7 @@ impl Constant {
     // there's NO Integer, Float type use I8, F32, F64 etc. etc.
     pub fn zero_for_operand(op: &Operand) -> Option<Constant> {
         match op {
+            Operand::Constant(Constant::Null) => Some(Constant::Null),
             Operand::Constant(Constant::I8(_)) => Some(Constant::I8(0)),
             Operand::Constant(Constant::I16(_)) => Some(Constant::I16(0)),
             Operand::Constant(Constant::I32(_)) => Some(Constant::I32(0)),
@@ -655,6 +660,7 @@ impl Constant {
     // Helper to get a one constant of a type compatible with an operand
     pub fn one_for_operand(op: &Operand) -> Option<Constant> {
         match op {
+            Operand::Constant(Constant::Null) => None,
             Operand::Constant(Constant::I8(_)) => Some(Constant::I8(1)),
             Operand::Constant(Constant::I16(_)) => Some(Constant::I16(1)),
             Operand::Constant(Constant::I32(_)) => Some(Constant::I32(1)),
@@ -837,6 +843,7 @@ impl Type {
     /// Create a Type from a Constant.
     pub fn from_constant(constant: &Constant) -> Self {
         match constant {
+            Constant::Null => Type::Class("java/lang/Object".to_string()),
             Constant::I8(_) => Type::I8,
             Constant::I16(_) => Type::I16,
             Constant::I32(_) => Type::I32,

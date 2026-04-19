@@ -177,6 +177,55 @@ pub fn read_constant_value_from_memory<'tcx>(
             }
         }
 
+        TyKind::FnPtr(..) | TyKind::FnDef(..) => {
+            let ptr_range = AllocRange {
+                start: offset,
+                size: tcx.data_layout.pointer_size(),
+            };
+            let scalar = allocation
+                .read_scalar(&tcx.data_layout, ptr_range, false)
+                .map_err(|e| {
+                    breadcrumbs::log!(
+                        breadcrumbs::LogLevel::Error,
+                        "const-eval",
+                        format!("Error reading function pointer scalar: {:?}", e)
+                    );
+                    "Failed to read function pointer scalar".to_string()
+                })?;
+
+            match scalar {
+                Scalar::Ptr(ptr, _) => {
+                    let (alloc_id, _) = ptr.into_raw_parts();
+                    if let Some(alloc_id) = alloc_id.get_alloc_id() {
+                        if let GlobalAlloc::Function { instance } = tcx.global_alloc(alloc_id) {
+                            breadcrumbs::log!(
+                                breadcrumbs::LogLevel::Warn,
+                                "const-eval",
+                                format!(
+                                    "Erasing function pointer constant {} to null during JVM bringup",
+                                    tcx.def_path_str(instance.def_id())
+                                )
+                            );
+                        }
+                    }
+                    Ok(oomir::Constant::Null)
+                }
+                Scalar::Int(scalar) => {
+                    let pointer_bits = scalar.to_bits(scalar.size());
+                    if pointer_bits != 0 {
+                        breadcrumbs::log!(
+                            breadcrumbs::LogLevel::Warn,
+                            "const-eval",
+                            format!(
+                                "Erasing function pointer constant {pointer_bits:#x} to null during JVM bringup"
+                            )
+                        );
+                    }
+                    Ok(oomir::Constant::Null)
+                }
+            }
+        }
+
         // --- String Slice (&str) ---
         // This case is typically handled via ConstValue::Slice or by reading a fat pointer (Ptr+meta)
         // A direct read from memory for `str` itself isn't standard, but handle if layout allows.

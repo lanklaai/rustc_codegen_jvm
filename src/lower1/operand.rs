@@ -140,6 +140,38 @@ fn scalar_int_to_wrapped_constant<'tcx>(
     }
 }
 
+fn scalar_int_as_i8(scalar_int: ScalarInt) -> i8 {
+    scalar_int.to_bits(scalar_int.size()) as i8
+}
+
+fn scalar_int_as_i16(scalar_int: ScalarInt) -> i16 {
+    scalar_int.to_bits(scalar_int.size()) as i16
+}
+
+fn scalar_int_as_u8(scalar_int: ScalarInt) -> u8 {
+    scalar_int.to_bits(scalar_int.size()) as u8
+}
+
+fn scalar_int_as_u16(scalar_int: ScalarInt) -> u16 {
+    scalar_int.to_bits(scalar_int.size()) as u16
+}
+
+fn scalar_int_as_i32(scalar_int: ScalarInt) -> i32 {
+    scalar_int.to_bits(scalar_int.size()) as i32
+}
+
+fn scalar_int_as_u32(scalar_int: ScalarInt) -> u32 {
+    scalar_int.to_bits(scalar_int.size()) as u32
+}
+
+fn scalar_int_as_i64(scalar_int: ScalarInt) -> i64 {
+    scalar_int.to_bits(scalar_int.size()) as i64
+}
+
+fn scalar_int_as_u64(scalar_int: ScalarInt) -> u64 {
+    scalar_int.to_bits(scalar_int.size()) as u64
+}
+
 /// Convert a MIR operand to an OOMIR operand.
 pub fn convert_operand<'tcx>(
     mir_op: &MirOperand<'tcx>,
@@ -1556,15 +1588,15 @@ pub fn extract_number_from_operand(operand: oomir::Operand) -> Option<i64> {
 fn scalar_int_to_oomir_constant(scalar_int: ScalarInt, ty: &Ty<'_>) -> oomir::Constant {
     match ty.kind() {
         TyKind::Int(int_ty) => match int_ty {
-            IntTy::I8 => oomir::Constant::I8(scalar_int.to_i8() as i8),
-            IntTy::I16 => oomir::Constant::I16(scalar_int.to_i16() as i16),
-            IntTy::I32 => oomir::Constant::I32(scalar_int.to_i32() as i32),
+            IntTy::I8 => oomir::Constant::I8(scalar_int_as_i8(scalar_int)),
+            IntTy::I16 => oomir::Constant::I16(scalar_int_as_i16(scalar_int)),
+            IntTy::I32 => oomir::Constant::I32(scalar_int_as_i32(scalar_int)),
             IntTy::Isize => match scalar_int.size().bytes() {
-                4 => oomir::Constant::I32(scalar_int.to_i32()),
-                8 => oomir::Constant::I32(scalar_int.to_i64() as i32),
+                4 | 2 | 1 => oomir::Constant::I32(scalar_int_as_i32(scalar_int)),
+                8 | 16 => oomir::Constant::I32(scalar_int_as_i64(scalar_int) as i32),
                 size => panic!("Unsupported isize ScalarInt width: {size}"),
             },
-            IntTy::I64 => oomir::Constant::I64(scalar_int.to_i64()),
+            IntTy::I64 => oomir::Constant::I64(scalar_int_as_i64(scalar_int)),
             IntTy::I128 => {
                 let value = scalar_int.to_i128();
                 let param = oomir::Constant::String(value.to_string());
@@ -1576,16 +1608,16 @@ fn scalar_int_to_oomir_constant(scalar_int: ScalarInt, ty: &Ty<'_>) -> oomir::Co
             }
         },
         TyKind::Uint(uint_ty) => match uint_ty {
-            UintTy::U8 => oomir::Constant::I16(scalar_int.to_u8() as i16), // Widen to cover range
-            UintTy::U16 => oomir::Constant::I32(scalar_int.to_u16() as i32), // Widen
-            UintTy::U32 => oomir::Constant::I64(scalar_int.to_u32() as i64), // Widen
+            UintTy::U8 => oomir::Constant::I16(scalar_int_as_u8(scalar_int) as i16), // Widen to cover range
+            UintTy::U16 => oomir::Constant::I32(scalar_int_as_u16(scalar_int) as i32), // Widen
+            UintTy::U32 => oomir::Constant::I64(scalar_int_as_u32(scalar_int) as i64), // Widen
             UintTy::Usize => match scalar_int.size().bytes() {
-                4 => oomir::Constant::I32(scalar_int.to_u32() as i32),
-                8 => oomir::Constant::I32(scalar_int.to_u64() as i32),
+                4 | 2 | 1 => oomir::Constant::I32(scalar_int_as_u32(scalar_int) as i32),
+                8 | 16 => oomir::Constant::I32(scalar_int_as_u64(scalar_int) as i32),
                 size => panic!("Unsupported usize ScalarInt width: {size}"),
             },
             UintTy::U64 => {
-                let value = scalar_int.to_u64();
+                let value = scalar_int_as_u64(scalar_int);
                 let param = oomir::Constant::String(value.to_string());
                 oomir::Constant::Instance {
                     class_name: "java/math/BigInteger".into(),
@@ -1608,13 +1640,13 @@ fn scalar_int_to_oomir_constant(scalar_int: ScalarInt, ty: &Ty<'_>) -> oomir::Co
             oomir::Constant::Boolean(val)
         }
         TyKind::Char => {
-            let val = char::from_u32(scalar_int.to_u32()).unwrap_or('\0');
+            let val = char::from_u32(scalar_int_as_u32(scalar_int)).unwrap_or('\0');
             oomir::Constant::Char(val)
         }
         TyKind::Float(float_ty) => match float_ty {
             FloatTy::F16 => {
                 // 1. Get the raw bits
-                let f16_bits = scalar_int.to_u16();
+                let f16_bits = scalar_int_as_u16(scalar_int);
                 // 2. Create an f16 from the bits.
                 // need to use half::f16 so we can call to_f32()
                 let f16_val = half::f16::from_bits(f16_bits);
@@ -1622,8 +1654,8 @@ fn scalar_int_to_oomir_constant(scalar_int: ScalarInt, ty: &Ty<'_>) -> oomir::Co
                 let f32_val = f16_val.to_f32();
                 oomir::Constant::F32(f32_val)
             }
-            FloatTy::F32 => oomir::Constant::F32(f32::from_bits(scalar_int.to_u32())),
-            FloatTy::F64 => oomir::Constant::F64(f64::from_bits(scalar_int.to_u64())),
+            FloatTy::F32 => oomir::Constant::F32(f32::from_bits(scalar_int_as_u32(scalar_int))),
+            FloatTy::F64 => oomir::Constant::F64(f64::from_bits(scalar_int_as_u64(scalar_int))),
             FloatTy::F128 => {
                 // 1. Pull out the raw bits
                 let bits: u128 = scalar_int.to_u128();
@@ -1633,13 +1665,39 @@ fn scalar_int_to_oomir_constant(scalar_int: ScalarInt, ty: &Ty<'_>) -> oomir::Co
             }
         },
         TyKind::Str => {
-            let val = scalar_int.to_u64();
+            let val = scalar_int_as_u64(scalar_int);
             oomir::Constant::String(val.to_string())
+        }
+        TyKind::RawPtr(_, _) => {
+            let pointer_bits = scalar_int.to_bits(scalar_int.size());
+            if pointer_bits != 0 {
+                breadcrumbs::log!(
+                    breadcrumbs::LogLevel::Warn,
+                    "const-eval",
+                    format!(
+                        "Erasing raw pointer constant {pointer_bits:#x} to null during JVM bringup"
+                    )
+                );
+            }
+            oomir::Constant::Null
+        }
+        TyKind::FnPtr(..) | TyKind::FnDef(..) => {
+            let pointer_bits = scalar_int.to_bits(scalar_int.size());
+            if pointer_bits != 0 {
+                breadcrumbs::log!(
+                    breadcrumbs::LogLevel::Warn,
+                    "const-eval",
+                    format!(
+                        "Erasing function pointer constant {pointer_bits:#x} to null during JVM bringup"
+                    )
+                );
+            }
+            oomir::Constant::Null
         }
         TyKind::Ref(_, ty, _) => {
             // Handle references by converting to the underlying type
             let inner_ty = ty;
-            let inner_scalar_int = scalar_int.to_u64();
+            let inner_scalar_int = scalar_int_as_u64(scalar_int);
             let inner_constant = scalar_int_to_oomir_constant(inner_scalar_int.into(), inner_ty);
             return inner_constant;
         }
