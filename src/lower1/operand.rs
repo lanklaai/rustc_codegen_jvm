@@ -1495,7 +1495,11 @@ fn scalar_int_to_oomir_constant(scalar_int: ScalarInt, ty: &Ty<'_>) -> oomir::Co
             IntTy::I8 => oomir::Constant::I8(scalar_int.to_i8() as i8),
             IntTy::I16 => oomir::Constant::I16(scalar_int.to_i16() as i16),
             IntTy::I32 => oomir::Constant::I32(scalar_int.to_i32() as i32),
-            IntTy::Isize => oomir::Constant::I32(scalar_int.to_i64() as i32), // JVM usize -> i32
+            IntTy::Isize => match scalar_int.size().bytes() {
+                4 => oomir::Constant::I32(scalar_int.to_i32()),
+                8 => oomir::Constant::I32(scalar_int.to_i64() as i32),
+                size => panic!("Unsupported isize ScalarInt width: {size}"),
+            },
             IntTy::I64 => oomir::Constant::I64(scalar_int.to_i64()),
             IntTy::I128 => {
                 let value = scalar_int.to_i128();
@@ -1511,7 +1515,11 @@ fn scalar_int_to_oomir_constant(scalar_int: ScalarInt, ty: &Ty<'_>) -> oomir::Co
             UintTy::U8 => oomir::Constant::I16(scalar_int.to_u8() as i16), // Widen to cover range
             UintTy::U16 => oomir::Constant::I32(scalar_int.to_u16() as i32), // Widen
             UintTy::U32 => oomir::Constant::I64(scalar_int.to_u32() as i64), // Widen
-            UintTy::Usize => oomir::Constant::I32(scalar_int.to_u64() as i32), // JVM usize -> i32
+            UintTy::Usize => match scalar_int.size().bytes() {
+                4 => oomir::Constant::I32(scalar_int.to_u32() as i32),
+                8 => oomir::Constant::I32(scalar_int.to_u64() as i32),
+                size => panic!("Unsupported usize ScalarInt width: {size}"),
+            },
             UintTy::U64 => {
                 let value = scalar_int.to_u64();
                 let param = oomir::Constant::String(value.to_string());

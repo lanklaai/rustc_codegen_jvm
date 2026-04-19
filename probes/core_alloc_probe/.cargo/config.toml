@@ -1,0 +1,15 @@
+[build]
+rustflags = [
+  "-Z", "codegen-backend=/source/rustc_codegen_jvm/target/release/librustc_codegen_jvm.so",
+  "-C", "linker=/source/rustc_codegen_jvm/java-linker/target/release/java-linker",
+  "-C", "link-args=/source/rustc_codegen_jvm/library/build/distributions/library-0.1.0/lib/library-0.1.0.jar /source/rustc_codegen_jvm/library/build/distributions/library-0.1.0/lib/kotlin-stdlib-2.2.21.jar /source/rustc_codegen_jvm/library/build/distributions/library-0.1.0/lib/annotations-13.0.jar --r8-jar /source/rustc_codegen_jvm/vendor/r8.jar --proguard-config /source/rustc_codegen_jvm/proguard/default.pro"
+]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+rustflags = [
+  "-C", "link-args=--release"
+]

@@ -1,0 +1,18 @@
+cargo-features = ["profile-rustflags"]
+
+[package]
+name = "core_alloc_probe"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "host_core"
+path = "src/bin/host_core.rs"
+
+[[bin]]
+name = "jvm_no_std"
+path = "src/bin/jvm_no_std.rs"
+
+[[bin]]
+name = "jvm_alloc"
+path = "src/bin/jvm_alloc.rs"

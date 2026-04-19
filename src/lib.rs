@@ -94,7 +94,7 @@ fn lower_closure_to_oomir<'tcx>(
         rustc_span::DUMMY_SP,
     );
 
-    let mut mir = tcx.optimized_mir(instance.def_id()).clone();
+    let mut mir = tcx.instance_mir(instance.def).clone();
 
     breadcrumbs::log!(
         breadcrumbs::LogLevel::Info,
@@ -177,7 +177,7 @@ impl CodegenBackend for MyBackend {
                 }
 
                 let instance = rustc_middle::ty::Instance::mono(tcx, def_id);
-                let mut mir = tcx.optimized_mir(instance.def_id()).clone(); // Clone the MIR
+                let mut mir = tcx.instance_mir(instance.def).clone(); // Clone the MIR
 
                 breadcrumbs::log!(
                     breadcrumbs::LogLevel::Info,
@@ -351,6 +351,21 @@ impl CodegenBackend for MyBackend {
                     None => None,
                 };
                 for item in impl_a.items {
+                    let impl_item =
+                        tcx.hir_impl_item(rustc_hir::ImplItemId { owner_id: item.owner_id });
+                    if !matches!(impl_item.kind, rustc_hir::ImplItemKind::Fn(..)) {
+                        breadcrumbs::log!(
+                            breadcrumbs::LogLevel::Info,
+                            "backend",
+                            format!(
+                                "Skipping non-function impl item {} (DefId: {:?})",
+                                impl_item.ident,
+                                item.owner_id.to_def_id()
+                            )
+                        );
+                        continue;
+                    }
+
                     let i = item.to_ident(tcx).to_string();
                     let def_id = item.owner_id.to_def_id();
 
@@ -369,7 +384,7 @@ impl CodegenBackend for MyBackend {
                     }
 
                     let instance = rustc_middle::ty::Instance::mono(tcx, def_id);
-                    let mut mir = tcx.optimized_mir(instance.def_id()).clone(); // Clone the MIR
+                    let mut mir = tcx.instance_mir(instance.def).clone(); // Clone the MIR
 
                     let i2 = format!("{}_{}", ident, i);
 
