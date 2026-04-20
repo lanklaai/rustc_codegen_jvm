@@ -42,6 +42,12 @@ This ordering matters because `std` will otherwise hide whether failures come fr
   - raw pointers and function pointers now erase to bringup-only `null` constants instead of integer stand-ins
   - function-pointer-like Rust types map to `java/lang/Object` during JVM bringup
   - direct lowering now skips foreign items, generic/alias-bearing instances, generic traits, traits with associated items, and other discovered instances that still need special handling
+- Fixed another group of real-`core` lowering failures in MIR and call lowering:
+  - `Rvalue::Repeat` array lengths now use `try_to_target_usize` instead of assuming `ConstKind::Value`
+  - nested helper functions such as `digit_unchecked::precondition_check` now get stable unique lowered names instead of colliding on leaf item names
+  - `simd_extract` and `simd_insert` intrinsics now lower directly instead of surfacing later as missing normal functions
+  - several common SIMD arithmetic/bitwise intrinsics are remapped onto the existing vector helper methods
+  - the foreign AVX helper `vcvttpd2udq256` now has a bringup-only inline lowering so sysroot compilation can continue past that path
 - Real `core` compilation now gets substantially farther and reaches backend lowering of sysroot crates.
 
 ## Execution plan
@@ -65,12 +71,15 @@ Capture the first failure in each stage before changing backend code.
 
 ## Immediate next steps
 
-1. Fix the next remaining `core` constant-lowering crash in the experimental constant path; the latest `jvm_no_std` run now fails while reading the foreign `libm` declaration behind `core::num::libm::cbrtf`, with the backtrace pointing at [`src/lower1/operand/experimental.rs`](../src/lower1/operand/experimental.rs).
-2. Remove the remaining `compiler_builtins` normalization ICE around `float::traits::Float::Int` and similar projection types; the backend still hits unresolved projection aliases in generic float/int support code.
-3. Decide how `f16` and `f128` should be represented on the JVM side during bringup:
+1. Keep extending direct lowering or shim coverage for the remaining foreign stdarch helpers hit by real `core`; the latest `jvm_no_std` run now fails on missing `cvtneeph2ps_256` while lowering `mm256_cvtneeph_ps`.
+2. Audit the growing family of SIMD/stdarch helper calls and separate them into:
+   - helpers that should lower directly in [`src/lower1/control_flow.rs`](../src/lower1/control_flow.rs)
+   - helpers that should become reusable runtime/shim methods
+3. Remove the remaining `compiler_builtins` normalization ICE around `float::traits::Float::Int` and similar projection types; the backend still hits unresolved projection aliases in generic float/int support code.
+4. Decide how `f16` and `f128` should be represented on the JVM side during bringup:
    either lower them to runtime helper objects consistently, or gate unsupported constant cases cleanly instead of relying on bringup-only sentinel encodings.
-4. Audit all remaining places that still assume full type normalization succeeds, especially in generic sysroot code paths that reference associated types or projection aliases.
-5. Start the cross-crate call model work after the current sysroot-lowering crashes are removed:
+5. Audit all remaining places that still assume full type normalization succeeds, especially in generic sysroot code paths that reference associated types or projection aliases.
+6. Start the cross-crate call model work after the current sysroot-lowering crashes are removed:
    upstream functions from `core` and `compiler_builtins` need real owner/class resolution instead of shim-name fallback.
 
 ### Phase 3: get real `alloc` compiling
@@ -91,7 +100,8 @@ Capture the first failure in each stage before changing backend code.
 ## Current blocker snapshot
 
 - `jvm_no_std` now reaches backend lowering for real `core`.
-- The original scalar-width constant panic is gone, but `core` still fails later in the experimental constant path while trying to read the foreign `libm` declaration used by `core::num::libm::cbrtf`.
+- Earlier failures in the experimental constant path, nested UB-check helpers, `simd_extract`, `simd_insert`, and `vcvttpd2udq256` are gone.
+- `core` now fails later on a different foreign stdarch helper, currently surfacing as missing lowered function `cvtneeph2ps_256` while lowering `mm256_cvtneeph_ps`.
 - `compiler_builtins` still fails in generic float support code, currently surfacing as unresolved projection normalization around `float::traits::Float::Int`.
 - `jvm_alloc` has not been usefully exercised yet because `core` is not compiling cleanly enough to move on.
 
