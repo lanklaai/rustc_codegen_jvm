@@ -1,7 +1,6 @@
 //! Naming helpers for functions and monomorphized instances
 
 use super::{place::make_jvm_safe, types::ty_to_oomir_type};
-use crate::oomir;
 use rustc_hir::def_id::DefId;
 use rustc_middle::{
     mir::Operand as MirOperand,
@@ -15,8 +14,7 @@ use std::collections::HashMap;
 /// For generic instantiations, we append a short hash of the concrete type descriptors
 /// to avoid very long names while keeping them unique per instantiation.
 pub fn mono_fn_name_from_instance<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> String {
-    let base = tcx.item_name(instance.def_id()).to_string();
-    let base = make_jvm_safe(&base);
+    let base = base_fn_name(tcx, instance.def_id());
 
     // Collect type descriptors from generic args (types only)
     let mut data_types = HashMap::new();
@@ -44,8 +42,7 @@ pub fn mono_fn_name_from_def_args<'tcx>(
     args: GenericArgsRef<'tcx>,
     instance: Instance<'tcx>,
 ) -> String {
-    let base = tcx.item_name(def_id).to_string();
-    let base = make_jvm_safe(&base);
+    let base = base_fn_name(tcx, def_id);
 
     let mut data_types = HashMap::new();
     let mut desc = String::new();
@@ -63,6 +60,15 @@ pub fn mono_fn_name_from_def_args<'tcx>(
         let hash = short_hash(&desc, 10);
         format!("{base}__{hash}")
     }
+}
+
+fn base_fn_name<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> String {
+    let raw_name = if tcx.opt_item_name(tcx.parent(def_id)).is_some() {
+        tcx.def_path_str(def_id)
+    } else {
+        tcx.item_name(def_id).to_string()
+    };
+    make_jvm_safe(&raw_name)
 }
 
 /// If `func` represents a FnDef(..) constant, returns a consistent JVM-safe name

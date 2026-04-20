@@ -1,15 +1,14 @@
 use rustc_abi::FieldIdx;
 use rustc_middle::{
     mir::{BinOp, Body, BorrowKind as MirBorrowKind, Operand as MirOperand, Place, Rvalue, UnOp},
-    ty::{ConstKind, Instance, TyCtxt, TyKind},
+    ty::{Instance, TyCtxt, TyKind},
 };
 use std::collections::HashMap;
 
 use super::{
     super::{
         operand::{
-            convert_operand, extract_number_from_operand, get_placeholder_operand,
-            handle_const_value,
+            convert_operand, get_placeholder_operand,
         },
         place::{emit_instructions_to_get_on_own, get_place_type, make_jvm_safe, place_to_string},
         types::{generate_adt_jvm_class_name, ty_to_oomir_type},
@@ -87,20 +86,18 @@ pub fn convert_rvalue_to_operand<'a>(
                     data_types,
                     &mut instructions,
                 );
-                let array_size = match len_const.kind() {
-                    ConstKind::Value(val) => {
-                        /* ... extract size ... */
-                        extract_number_from_operand(handle_const_value(
-                            None,
-                            tcx.valtree_to_const_val(val),
-                            &val.ty,
-                            tcx,
-                            data_types,
-                            instance,
-                        ))
-                        .unwrap_or(0)
-                    } // Simplified extraction
-                    _ => panic!("Expected constant value for array size"),
+                let array_size = if let Some(array_len) = len_const.try_to_target_usize(tcx) {
+                    array_len as i64
+                } else {
+                    breadcrumbs::log!(
+                        breadcrumbs::LogLevel::Warn,
+                        "mir-lowering",
+                        format!(
+                            "Warning: Could not resolve repeat-array length {:?} for rvalue {:?}; using size 0 placeholder",
+                            len_const, rvalue
+                        )
+                    );
+                    0
                 };
                 let size_operand =
                     oomir::Operand::Constant(oomir::Constant::I32(array_size as i32));

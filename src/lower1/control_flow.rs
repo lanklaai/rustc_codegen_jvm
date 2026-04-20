@@ -1,10 +1,10 @@
 use super::{
     operand::convert_operand,
     place::{
-        emit_instructions_to_get_on_own, emit_instructions_to_set_value, make_jvm_safe,
+        emit_instructions_to_get_on_own, emit_instructions_to_set_value, get_place_type, make_jvm_safe,
         place_to_string,
     },
-    types::mir_int_to_oomir_const,
+    types::{get_field_name_from_index, mir_int_to_oomir_const},
 };
 use crate::oomir;
 
@@ -243,8 +243,400 @@ pub fn convert_basic_block<'tcx>(
                     format!("the function name is {:?}", func)
                 );
 
+                if let rustc_middle::mir::Operand::Constant(box c) = func {
+                    let fn_ty = c.const_.ty();
+                    if let rustc_middle::ty::TyKind::FnDef(def_id, _) = fn_ty.kind() {
+                        let def_path = tcx.def_path_str(*def_id);
+                        if def_path.ends_with("avx512f::vcvttpd2udq256") {
+                            breadcrumbs::log!(
+                                breadcrumbs::LogLevel::Warn,
+                                "mir-lowering",
+                                format!(
+                                    "Inlining placeholder lowering for foreign intrinsic {}",
+                                    def_path
+                                )
+                            );
+
+                            if args.len() != 3 {
+                                panic!(
+                                    "vcvttpd2udq256 expected 3 args, got {} for {}",
+                                    args.len(),
+                                    def_path
+                                );
+                            }
+
+                            let source_operand = convert_operand(
+                                &args[1].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+                            let result_ty =
+                                get_place_type(destination, mir, tcx, instance, data_types);
+                            let temp_dest =
+                                format!("{}_vcvttpd2udq256_{}", place_to_string(destination, tcx), bb.index());
+
+                            let lowered_operand = if source_operand.get_type() == Some(result_ty.clone()) {
+                                source_operand
+                            } else {
+                                instructions.push(oomir::Instruction::Cast {
+                                    op: source_operand,
+                                    ty: result_ty.clone(),
+                                    dest: temp_dest.clone(),
+                                });
+                                oomir::Operand::Variable {
+                                    name: temp_dest,
+                                    ty: result_ty.clone(),
+                                }
+                            };
+
+                            let set_instrs = emit_instructions_to_set_value(
+                                destination,
+                                lowered_operand,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                            );
+                            instructions.extend(set_instrs);
+
+                            if let Some(target_bb) = target {
+                                instructions.push(oomir::Instruction::Jump {
+                                    target: format!("bb{}", target_bb.index()),
+                                });
+                            }
+
+                            return oomir::BasicBlock {
+                                label,
+                                instructions,
+                            };
+                        }
+
+                        if def_path.ends_with("intrinsics::simd::simd_insert")
+                            || def_path.ends_with("intrinsics::simd::simd_insert_dyn")
+                        {
+                            breadcrumbs::log!(
+                                breadcrumbs::LogLevel::Info,
+                                "mir-lowering",
+                                format!("Inlining SIMD insert intrinsic {}", def_path)
+                            );
+
+                            if args.len() != 3 {
+                                panic!(
+                                    "SIMD insert intrinsic expected 3 args, got {} for {}",
+                                    args.len(),
+                                    def_path
+                                );
+                            }
+
+                            let vector_operand = convert_operand(
+                                &args[0].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+                            let index_operand = convert_operand(
+                                &args[1].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+                            let value_operand = convert_operand(
+                                &args[2].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+
+                            let vector_class_name = match vector_operand.get_type() {
+                                Some(oomir::Type::Class(name)) => name,
+                                Some(oomir::Type::Reference(box oomir::Type::Class(name))) => name,
+                                Some(oomir::Type::MutableReference(box oomir::Type::Class(name))) => {
+                                    name
+                                }
+                                other => panic!(
+                                    "SIMD insert expected class-like vector operand, got {:?}",
+                                    other
+                                ),
+                            };
+
+                            let (lane_field_name, lane_array_ty) = match data_types
+                                .get(&vector_class_name)
+                            {
+                                Some(oomir::DataType::Class { fields, .. }) => {
+                                    let field_name = get_field_name_from_index(
+                                        &vector_class_name,
+                                        0,
+                                        data_types,
+                                    )
+                                    .unwrap_or_else(|e| {
+                                        panic!(
+                                            "SIMD insert could not resolve lane field for {}: {}",
+                                            vector_class_name, e
+                                        )
+                                    });
+                                    let field_ty = fields
+                                        .first()
+                                        .map(|(_, ty)| ty.clone())
+                                        .unwrap_or_else(|| {
+                                            panic!(
+                                                "SIMD insert found no fields on vector class {}",
+                                                vector_class_name
+                                            )
+                                        });
+                                    (field_name, field_ty)
+                                }
+                                other => panic!(
+                                    "SIMD insert expected registered class metadata for {}, got {:?}",
+                                    vector_class_name, other
+                                ),
+                            };
+
+                            let lane_array_var = format!(
+                                "{}_simd_lanes_{}",
+                                place_to_string(destination, tcx),
+                                bb.index()
+                            );
+                            instructions.push(oomir::Instruction::GetField {
+                                dest: lane_array_var.clone(),
+                                object: vector_operand.clone(),
+                                field_name: lane_field_name,
+                                field_ty: lane_array_ty.clone(),
+                                owner_class: vector_class_name,
+                            });
+                            instructions.push(oomir::Instruction::ArrayStore {
+                                array: lane_array_var,
+                                index: index_operand,
+                                value: value_operand,
+                            });
+
+                            let set_instrs = emit_instructions_to_set_value(
+                                destination,
+                                vector_operand,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                            );
+                            instructions.extend(set_instrs);
+
+                            if let Some(target_bb) = target {
+                                instructions.push(oomir::Instruction::Jump {
+                                    target: format!("bb{}", target_bb.index()),
+                                });
+                            }
+
+                            return oomir::BasicBlock {
+                                label,
+                                instructions,
+                            };
+                        }
+
+                        if def_path.ends_with("intrinsics::simd::simd_extract")
+                            || def_path.ends_with("intrinsics::simd::simd_extract_dyn")
+                        {
+                            breadcrumbs::log!(
+                                breadcrumbs::LogLevel::Info,
+                                "mir-lowering",
+                                format!("Inlining SIMD extract intrinsic {}", def_path)
+                            );
+
+                            if args.len() != 2 {
+                                panic!(
+                                    "SIMD extract intrinsic expected 2 args, got {} for {}",
+                                    args.len(),
+                                    def_path
+                                );
+                            }
+
+                            let vector_operand = convert_operand(
+                                &args[0].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+                            let index_operand = convert_operand(
+                                &args[1].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+
+                            let vector_class_name = match vector_operand.get_type() {
+                                Some(oomir::Type::Class(name)) => name,
+                                Some(oomir::Type::Reference(box oomir::Type::Class(name))) => name,
+                                Some(oomir::Type::MutableReference(box oomir::Type::Class(name))) => {
+                                    name
+                                }
+                                other => panic!(
+                                    "SIMD extract expected class-like vector operand, got {:?}",
+                                    other
+                                ),
+                            };
+
+                            let (lane_field_name, lane_array_ty) = match data_types
+                                .get(&vector_class_name)
+                            {
+                                Some(oomir::DataType::Class { fields, .. }) => {
+                                    let field_name = get_field_name_from_index(
+                                        &vector_class_name,
+                                        0,
+                                        data_types,
+                                    )
+                                    .unwrap_or_else(|e| {
+                                        panic!(
+                                            "SIMD extract could not resolve lane field for {}: {}",
+                                            vector_class_name, e
+                                        )
+                                    });
+                                    let field_ty = fields
+                                        .first()
+                                        .map(|(_, ty)| ty.clone())
+                                        .unwrap_or_else(|| {
+                                            panic!(
+                                                "SIMD extract found no fields on vector class {}",
+                                                vector_class_name
+                                            )
+                                        });
+                                    (field_name, field_ty)
+                                }
+                                other => panic!(
+                                    "SIMD extract expected registered class metadata for {}, got {:?}",
+                                    vector_class_name, other
+                                ),
+                            };
+
+                            let lane_array_var = format!(
+                                "{}_simd_lanes_{}",
+                                place_to_string(destination, tcx),
+                                bb.index()
+                            );
+                            instructions.push(oomir::Instruction::GetField {
+                                dest: lane_array_var.clone(),
+                                object: vector_operand,
+                                field_name: lane_field_name,
+                                field_ty: lane_array_ty.clone(),
+                                owner_class: vector_class_name,
+                            });
+
+                            let result_ty = get_place_type(destination, mir, tcx, instance, data_types);
+                            let result_var = if destination.projection.is_empty() {
+                                place_to_string(destination, tcx)
+                            } else {
+                                format!("{}_simd_extract_{}", place_to_string(destination, tcx), bb.index())
+                            };
+
+                            instructions.push(oomir::Instruction::ArrayGet {
+                                dest: result_var.clone(),
+                                array: oomir::Operand::Variable {
+                                    name: lane_array_var,
+                                    ty: lane_array_ty,
+                                },
+                                index: index_operand,
+                            });
+
+                            if !destination.projection.is_empty() {
+                                let set_instrs = emit_instructions_to_set_value(
+                                    destination,
+                                    oomir::Operand::Variable {
+                                        name: result_var,
+                                        ty: result_ty.clone(),
+                                    },
+                                    tcx,
+                                    instance,
+                                    mir,
+                                    data_types,
+                                );
+                                instructions.extend(set_instrs);
+                            }
+
+                            if let Some(target_bb) = target {
+                                instructions.push(oomir::Instruction::Jump {
+                                    target: format!("bb{}", target_bb.index()),
+                                });
+                            }
+
+                            return oomir::BasicBlock {
+                                label,
+                                instructions,
+                            };
+                        }
+                    }
+                }
+
+                let special_simd_function_name =
+                    if let rustc_middle::mir::Operand::Constant(box c) = func {
+                        let fn_ty = c.const_.ty();
+                        if let rustc_middle::ty::TyKind::FnDef(def_id, _) = fn_ty.kind() {
+                            let def_path = tcx.def_path_str(*def_id);
+                            let method_name = if def_path.ends_with("intrinsics::simd::simd_and")
+                            {
+                                Some("bitand")
+                            } else if def_path.ends_with("intrinsics::simd::simd_or") {
+                                Some("bitor")
+                            } else if def_path.ends_with("intrinsics::simd::simd_xor") {
+                                Some("bitxor")
+                            } else if def_path.ends_with("intrinsics::simd::simd_add") {
+                                Some("add")
+                            } else if def_path.ends_with("intrinsics::simd::simd_sub") {
+                                Some("sub")
+                            } else if def_path.ends_with("intrinsics::simd::simd_mul") {
+                                Some("mul")
+                            } else if def_path.ends_with("intrinsics::simd::simd_div") {
+                                Some("div")
+                            } else if def_path.ends_with("intrinsics::simd::simd_rem") {
+                                Some("rem")
+                            } else if def_path.ends_with("intrinsics::simd::simd_shl") {
+                                Some("shl")
+                            } else if def_path.ends_with("intrinsics::simd::simd_shr") {
+                                Some("shr")
+                            } else {
+                                None
+                            };
+
+                            method_name.and_then(|method_name| {
+                                let simd_ty = args.first()?.node.ty(&mir.local_decls, tcx);
+                                let simd_oomir_ty = super::types::ty_to_oomir_type(
+                                    simd_ty,
+                                    tcx,
+                                    &mut Default::default(),
+                                    instance,
+                                );
+                                let class_name = match simd_oomir_ty {
+                                    oomir::Type::Class(name) => name,
+                                    oomir::Type::Reference(box oomir::Type::Class(name)) => name,
+                                    oomir::Type::MutableReference(box oomir::Type::Class(name)) => {
+                                        name
+                                    }
+                                    _ => return None,
+                                };
+                                Some(format!("{}_{}", class_name, method_name))
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
                 // Try to detect if this is a closure call
-                let (function_name, is_closure_call) = if let Some(closure_info) =
+                let (function_name, is_closure_call) = if let Some(function_name) =
+                    special_simd_function_name
+                {
+                    (function_name, false)
+                } else if let Some(closure_info) =
                     super::closures::extract_closure_info(func, tcx)
                 {
                     // This is a closure call - generate the proper closure function name
