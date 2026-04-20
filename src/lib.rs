@@ -998,8 +998,18 @@ impl CodegenBackend for MyBackend {
                         .map(|(i, ty)| {
                             // For trait methods, we don't have MIR, so use generic names
                             let param_name = format!("arg{}", i);
-                            let oomir_type =
-                                lower1::types::ty_to_oomir_type(*ty, tcx, data_types, instance);
+                            let oomir_type = match lower1::types::ty_to_oomir_type(
+                                *ty,
+                                tcx,
+                                data_types,
+                                instance,
+                            ) {
+                                oomir::Type::Void => {
+                                    // JVM method descriptors cannot contain `V` in parameter position.
+                                    oomir::Type::Class("java/lang/Object".to_string())
+                                }
+                                other => other,
+                            };
                             (param_name, oomir_type)
                         })
                         .collect();

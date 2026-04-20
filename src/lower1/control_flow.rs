@@ -768,6 +768,51 @@ pub fn convert_basic_block<'tcx>(
                             };
                         }
 
+                        if def_path.ends_with("intrinsics::simd::simd_bitmask") {
+                            breadcrumbs::log!(
+                                breadcrumbs::LogLevel::Warn,
+                                "mir-lowering",
+                                format!("Inlining placeholder SIMD bitmask intrinsic {}", def_path)
+                            );
+
+                            if args.len() != 1 {
+                                panic!(
+                                    "SIMD bitmask intrinsic expected 1 arg, got {} for {}",
+                                    args.len(),
+                                    def_path
+                                );
+                            }
+
+                            let result_ty =
+                                get_place_type(destination, mir, tcx, instance, data_types);
+                            let zero_result = zero_constant_for_type(&result_ty).unwrap_or_else(|| {
+                                panic!(
+                                    "SIMD bitmask does not support result type {:?} for {}",
+                                    result_ty, def_path
+                                )
+                            });
+
+                            instructions.extend(emit_instructions_to_set_value(
+                                destination,
+                                oomir::Operand::Constant(zero_result),
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                            ));
+
+                            if let Some(target_bb) = target {
+                                instructions.push(oomir::Instruction::Jump {
+                                    target: format!("bb{}", target_bb.index()),
+                                });
+                            }
+
+                            return oomir::BasicBlock {
+                                label,
+                                instructions,
+                            };
+                        }
+
                         if def_path.ends_with("intrinsics::simd::simd_eq")
                             || def_path.ends_with("intrinsics::simd::simd_ne")
                             || def_path.ends_with("intrinsics::simd::simd_lt")

@@ -25,6 +25,15 @@ pub mod types;
 
 pub use closures::{ClosureCallInfo, extract_closure_info, generate_closure_function_name};
 
+fn sanitize_param_oomir_type(ty: oomir::Type) -> oomir::Type {
+    match ty {
+        // JVM descriptors cannot use `V` in parameter position. Treat uninhabited/unit
+        // parameter slots as an erased reference carrier for bringup.
+        oomir::Type::Void => oomir::Type::Class("java/lang/Object".to_string()),
+        other => other,
+    }
+}
+
 
 /// Converts a MIR Body into an OOMIR Function.
 /// This function extracts a function's signature (currently minimal) and builds
@@ -95,7 +104,12 @@ pub fn mir_to_oomir<'tcx>(
                 })
                 .unwrap_or_else(|| format!("arg{}", i));
 
-            let oomir_type = ty_to_oomir_type(*ty, tcx, data_types, instance);
+            let oomir_type = sanitize_param_oomir_type(ty_to_oomir_type(
+                *ty,
+                tcx,
+                data_types,
+                instance,
+            ));
 
             // Return the (name, type) tuple
             (param_name, oomir_type)
