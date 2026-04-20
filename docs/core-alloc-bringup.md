@@ -38,6 +38,10 @@ This ordering matters because `std` will otherwise hide whether failures come fr
   - scalar-backed transparent wrappers now unwrap recursively during constant lowering, including `NonZero*`-style nested wrappers
   - zero-field scalar wrapper constants now degrade to empty constant instances instead of aborting
   - type lowering now uses fallible normalization and preserves unresolved aliases instead of crashing immediately on projection types
+- Removed the old `ScalarInt` width mismatch crash and a related class of premature sysroot lowering attempts:
+  - raw pointers and function pointers now erase to bringup-only `null` constants instead of integer stand-ins
+  - function-pointer-like Rust types map to `java/lang/Object` during JVM bringup
+  - direct lowering now skips foreign items, generic/alias-bearing instances, generic traits, traits with associated items, and other discovered instances that still need special handling
 - Real `core` compilation now gets substantially farther and reaches backend lowering of sysroot crates.
 
 ## Execution plan
@@ -61,8 +65,8 @@ Capture the first failure in each stage before changing backend code.
 
 ## Immediate next steps
 
-1. Fix the next remaining `core` constant-lowering crash in [`src/lower1/operand.rs`](../src/lower1/operand.rs); the latest `jvm_no_std` run still finds additional scalar-backed wrapper shapes after the `f128` and `NonZero*` paths were removed.
-2. Remove the remaining `compiler_builtins` normalization ICE around `float::traits::Float::Int` and similar projection types; the backend still hits a hard `normalize_erasing_regions` failure in generic float/int support code.
+1. Fix the next remaining `core` constant-lowering crash in the experimental constant path; the latest `jvm_no_std` run now fails while reading the foreign `libm` declaration behind `core::num::libm::cbrtf`, with the backtrace pointing at [`src/lower1/operand/experimental.rs`](../src/lower1/operand/experimental.rs).
+2. Remove the remaining `compiler_builtins` normalization ICE around `float::traits::Float::Int` and similar projection types; the backend still hits unresolved projection aliases in generic float/int support code.
 3. Decide how `f16` and `f128` should be represented on the JVM side during bringup:
    either lower them to runtime helper objects consistently, or gate unsupported constant cases cleanly instead of relying on bringup-only sentinel encodings.
 4. Audit all remaining places that still assume full type normalization succeeds, especially in generic sysroot code paths that reference associated types or projection aliases.
@@ -87,8 +91,8 @@ Capture the first failure in each stage before changing backend code.
 ## Current blocker snapshot
 
 - `jvm_no_std` now reaches backend lowering for real `core`.
-- The original `f128` constant panic is gone, but `core` still has at least one later constant-lowering panic in [`src/lower1/operand.rs`](../src/lower1/operand.rs) around additional scalar-backed wrapper shapes.
-- `compiler_builtins` still fails in generic float support code, currently surfacing as a `normalize_erasing_regions` ICE around `float::traits::Float::Int` projection types.
+- The original scalar-width constant panic is gone, but `core` still fails later in the experimental constant path while trying to read the foreign `libm` declaration used by `core::num::libm::cbrtf`.
+- `compiler_builtins` still fails in generic float support code, currently surfacing as unresolved projection normalization around `float::traits::Float::Int`.
 - `jvm_alloc` has not been usefully exercised yet because `core` is not compiling cleanly enough to move on.
 
 ## Expected first blockers
