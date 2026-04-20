@@ -121,7 +121,7 @@ pub fn ty_to_oomir_type<'tcx>(
                     };
                 }
 
-                if adt_def.is_struct() {
+                if adt_def.is_struct() || adt_def.is_union() {
                     let variant = adt_def.variant(0usize.into());
                     let oomir_fields = variant
                         .fields

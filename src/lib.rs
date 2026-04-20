@@ -122,6 +122,13 @@ fn should_skip_discovered_instance<'tcx>(
     tcx: TyCtxt<'tcx>,
     instance: rustc_middle::ty::Instance<'tcx>,
 ) -> Option<String> {
+    if tcx.is_foreign_item(instance.def_id()) {
+        return Some(format!(
+            "foreign item {} has no MIR body to lower",
+            tcx.def_path_str(instance.def_id())
+        ));
+    }
+
     match instance.def {
         rustc_middle::ty::InstanceKind::Virtual(_, _) => {
             return Some("virtual dispatch is handled at runtime".to_string());

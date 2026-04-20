@@ -371,6 +371,30 @@ fn handle_constant_struct<'tcx>(
 ) -> Result<oomir::Constant, String> {
     let variant = adt_def.variant(VariantIdx::from_usize(0)); // Structs have one variant
     let mut fields_map = HashMap::new();
+    let class_name = generate_adt_jvm_class_name(&adt_def, substs, tcx, oomir_data_types, instance);
+
+    if !oomir_data_types.contains_key(&class_name) {
+        let fields = variant
+            .fields
+            .iter()
+            .map(|field_def| {
+                let field_name = field_def.ident(tcx).to_string();
+                let field_ty = field_def.ty(tcx, substs);
+                let field_oomir_type = ty_to_oomir_type(field_ty, tcx, oomir_data_types, instance);
+                (field_name, field_oomir_type)
+            })
+            .collect::<Vec<_>>();
+        oomir_data_types.insert(
+            class_name.clone(),
+            oomir::DataType::Class {
+                fields,
+                is_abstract: false,
+                methods: HashMap::new(),
+                super_class: None,
+                interfaces: vec![],
+            },
+        );
+    }
 
     for (i, field_def) in variant.fields.iter().enumerate() {
         let field_idx = FieldIdx::from_usize(i);
@@ -399,9 +423,6 @@ fn handle_constant_struct<'tcx>(
         )?;
         fields_map.insert(field_name, field_const);
     }
-
-    let rust_path = tcx.def_path_str(adt_def.did());
-    let class_name = make_jvm_safe(&rust_path).replace("::", "/");
 
     Ok(oomir::Constant::Instance {
         class_name,
