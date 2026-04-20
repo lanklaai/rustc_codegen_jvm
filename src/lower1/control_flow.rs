@@ -24,6 +24,27 @@ mod rvalue;
 
 pub use checked_intrinsic_registry::take_needed_intrinsics;
 
+fn zero_constant_for_type(ty: &oomir::Type) -> Option<oomir::Constant> {
+    match ty {
+        oomir::Type::Boolean => Some(oomir::Constant::Boolean(false)),
+        oomir::Type::Char => Some(oomir::Constant::Char('\0')),
+        oomir::Type::I8 => Some(oomir::Constant::I8(0)),
+        oomir::Type::I16 => Some(oomir::Constant::I16(0)),
+        oomir::Type::I32 => Some(oomir::Constant::I32(0)),
+        oomir::Type::I64 => Some(oomir::Constant::I64(0)),
+        oomir::Type::F32 => Some(oomir::Constant::F32(0.0)),
+        oomir::Type::F64 => Some(oomir::Constant::F64(0.0)),
+        oomir::Type::Class(class_name) if class_name == crate::lower2::BIG_INTEGER_CLASS => {
+            Some(oomir::Constant::Instance {
+                class_name: class_name.clone(),
+                fields: std::collections::HashMap::new(),
+                params: vec![oomir::Constant::String("0".to_string())],
+            })
+        }
+        _ => None,
+    }
+}
+
 /// Convert a single MIR basic block into an OOMIR basic block.
 pub fn convert_basic_block<'tcx>(
     bb: BasicBlock,
@@ -247,6 +268,74 @@ pub fn convert_basic_block<'tcx>(
                     let fn_ty = c.const_.ty();
                     if let rustc_middle::ty::TyKind::FnDef(def_id, _) = fn_ty.kind() {
                         let def_path = tcx.def_path_str(*def_id);
+                        if def_path.ends_with("avxneconvert::cvtneeph2ps_256") {
+                            breadcrumbs::log!(
+                                breadcrumbs::LogLevel::Warn,
+                                "mir-lowering",
+                                format!(
+                                    "Inlining placeholder lowering for foreign intrinsic {}",
+                                    def_path
+                                )
+                            );
+
+                            if args.len() != 1 {
+                                panic!(
+                                    "cvtneeph2ps_256 expected 1 arg, got {} for {}",
+                                    args.len(),
+                                    def_path
+                                );
+                            }
+
+                            let source_operand = convert_operand(
+                                &args[0].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+                            let result_ty =
+                                get_place_type(destination, mir, tcx, instance, data_types);
+                            let temp_dest =
+                                format!("{}_cvtneeph2ps_256_{}", place_to_string(destination, tcx), bb.index());
+
+                            let lowered_operand =
+                                if source_operand.get_type() == Some(result_ty.clone()) {
+                                    source_operand
+                                } else {
+                                    instructions.push(oomir::Instruction::Cast {
+                                        op: source_operand,
+                                        ty: result_ty.clone(),
+                                        dest: temp_dest.clone(),
+                                    });
+                                    oomir::Operand::Variable {
+                                        name: temp_dest,
+                                        ty: result_ty.clone(),
+                                    }
+                                };
+
+                            let set_instrs = emit_instructions_to_set_value(
+                                destination,
+                                lowered_operand,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                            );
+                            instructions.extend(set_instrs);
+
+                            if let Some(target_bb) = target {
+                                instructions.push(oomir::Instruction::Jump {
+                                    target: format!("bb{}", target_bb.index()),
+                                });
+                            }
+
+                            return oomir::BasicBlock {
+                                label,
+                                instructions,
+                            };
+                        }
+
                         if def_path.ends_with("avx512f::vcvttpd2udq256") {
                             breadcrumbs::log!(
                                 breadcrumbs::LogLevel::Warn,
@@ -427,6 +516,320 @@ pub fn convert_basic_block<'tcx>(
                                 data_types,
                             );
                             instructions.extend(set_instrs);
+
+                            if let Some(target_bb) = target {
+                                instructions.push(oomir::Instruction::Jump {
+                                    target: format!("bb{}", target_bb.index()),
+                                });
+                            }
+
+                            return oomir::BasicBlock {
+                                label,
+                                instructions,
+                            };
+                        }
+
+                        if def_path.ends_with("intrinsics::simd::simd_select_bitmask") {
+                            breadcrumbs::log!(
+                                breadcrumbs::LogLevel::Warn,
+                                "mir-lowering",
+                                format!(
+                                    "Inlining placeholder SIMD select bitmask intrinsic {}",
+                                    def_path
+                                )
+                            );
+
+                            if args.len() != 3 {
+                                panic!(
+                                    "SIMD select bitmask intrinsic expected 3 args, got {} for {}",
+                                    args.len(),
+                                    def_path
+                                );
+                            }
+
+                            let mask_operand = convert_operand(
+                                &args[0].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+                            let on_operand = convert_operand(
+                                &args[1].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+                            let off_operand = convert_operand(
+                                &args[2].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+
+                            let result_ty =
+                                get_place_type(destination, mir, tcx, instance, data_types);
+                            let mask_ty = mask_operand.get_type().unwrap_or_else(|| {
+                                panic!(
+                                    "SIMD select bitmask mask operand had no type for {}",
+                                    def_path
+                                )
+                            });
+                            let zero_mask = zero_constant_for_type(&mask_ty).unwrap_or_else(|| {
+                                panic!(
+                                    "SIMD select bitmask does not support mask type {:?} for {}",
+                                    mask_ty, def_path
+                                )
+                            });
+
+                            let normalize_branch_operand =
+                                |instructions: &mut Vec<oomir::Instruction>,
+                                 operand: oomir::Operand,
+                                 suffix: &str| {
+                                    if operand.get_type() == Some(result_ty.clone()) {
+                                        operand
+                                    } else {
+                                        let cast_dest = format!(
+                                            "{}_simd_select_bitmask_{}_{}_{}",
+                                            place_to_string(destination, tcx),
+                                            bb.index(),
+                                            suffix,
+                                            make_jvm_safe(&def_path)
+                                        );
+                                        instructions.push(oomir::Instruction::Cast {
+                                            op: operand,
+                                            ty: result_ty.clone(),
+                                            dest: cast_dest.clone(),
+                                        });
+                                        oomir::Operand::Variable {
+                                            name: cast_dest,
+                                            ty: result_ty.clone(),
+                                        }
+                                    }
+                                };
+
+                            let on_operand =
+                                normalize_branch_operand(&mut instructions, on_operand, "on");
+                            let off_operand =
+                                normalize_branch_operand(&mut instructions, off_operand, "off");
+
+                            let cond_var = format!(
+                                "{}_simd_select_bitmask_nonzero_{}",
+                                place_to_string(destination, tcx),
+                                bb.index()
+                            );
+                            let true_label = format!(
+                                "{}_simd_select_bitmask_true_{}",
+                                place_to_string(destination, tcx),
+                                bb.index()
+                            );
+                            let false_label = format!(
+                                "{}_simd_select_bitmask_false_{}",
+                                place_to_string(destination, tcx),
+                                bb.index()
+                            );
+                            let end_label = format!(
+                                "{}_simd_select_bitmask_end_{}",
+                                place_to_string(destination, tcx),
+                                bb.index()
+                            );
+                            let result_var = format!(
+                                "{}_simd_select_bitmask_{}",
+                                place_to_string(destination, tcx),
+                                bb.index()
+                            );
+
+                            instructions.push(oomir::Instruction::Ne {
+                                dest: cond_var.clone(),
+                                op1: mask_operand,
+                                op2: oomir::Operand::Constant(zero_mask),
+                            });
+                            instructions.push(oomir::Instruction::Branch {
+                                condition: oomir::Operand::Variable {
+                                    name: cond_var,
+                                    ty: oomir::Type::Boolean,
+                                },
+                                true_block: true_label.clone(),
+                                false_block: false_label.clone(),
+                            });
+
+                            instructions.push(oomir::Instruction::Label { name: true_label });
+                            instructions.push(oomir::Instruction::Move {
+                                dest: result_var.clone(),
+                                src: on_operand,
+                            });
+                            instructions.push(oomir::Instruction::Jump {
+                                target: end_label.clone(),
+                            });
+
+                            instructions.push(oomir::Instruction::Label { name: false_label });
+                            instructions.push(oomir::Instruction::Move {
+                                dest: result_var.clone(),
+                                src: off_operand,
+                            });
+                            instructions.push(oomir::Instruction::Jump {
+                                target: end_label.clone(),
+                            });
+
+                            instructions.push(oomir::Instruction::Label { name: end_label });
+                            instructions.extend(emit_instructions_to_set_value(
+                                destination,
+                                oomir::Operand::Variable {
+                                    name: result_var,
+                                    ty: result_ty.clone(),
+                                },
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                            ));
+
+                            if let Some(target_bb) = target {
+                                instructions.push(oomir::Instruction::Jump {
+                                    target: format!("bb{}", target_bb.index()),
+                                });
+                            }
+
+                            return oomir::BasicBlock {
+                                label,
+                                instructions,
+                            };
+                        }
+
+                        if def_path.ends_with("intrinsics::simd::simd_select") {
+                            breadcrumbs::log!(
+                                breadcrumbs::LogLevel::Warn,
+                                "mir-lowering",
+                                format!("Inlining placeholder SIMD select intrinsic {}", def_path)
+                            );
+
+                            if args.len() != 3 {
+                                panic!(
+                                    "SIMD select intrinsic expected 3 args, got {} for {}",
+                                    args.len(),
+                                    def_path
+                                );
+                            }
+
+                            let selected_operand = convert_operand(
+                                &args[1].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+                            let result_ty =
+                                get_place_type(destination, mir, tcx, instance, data_types);
+                            let temp_dest = format!(
+                                "{}_simd_select_{}",
+                                place_to_string(destination, tcx),
+                                bb.index()
+                            );
+
+                            let lowered_operand =
+                                if selected_operand.get_type() == Some(result_ty.clone()) {
+                                    selected_operand
+                                } else {
+                                    instructions.push(oomir::Instruction::Cast {
+                                        op: selected_operand,
+                                        ty: result_ty.clone(),
+                                        dest: temp_dest.clone(),
+                                    });
+                                    oomir::Operand::Variable {
+                                        name: temp_dest,
+                                        ty: result_ty.clone(),
+                                    }
+                                };
+
+                            instructions.extend(emit_instructions_to_set_value(
+                                destination,
+                                lowered_operand,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                            ));
+
+                            if let Some(target_bb) = target {
+                                instructions.push(oomir::Instruction::Jump {
+                                    target: format!("bb{}", target_bb.index()),
+                                });
+                            }
+
+                            return oomir::BasicBlock {
+                                label,
+                                instructions,
+                            };
+                        }
+
+                        if def_path.ends_with("intrinsics::simd::simd_eq")
+                            || def_path.ends_with("intrinsics::simd::simd_ne")
+                            || def_path.ends_with("intrinsics::simd::simd_lt")
+                            || def_path.ends_with("intrinsics::simd::simd_le")
+                            || def_path.ends_with("intrinsics::simd::simd_gt")
+                            || def_path.ends_with("intrinsics::simd::simd_ge")
+                        {
+                            breadcrumbs::log!(
+                                breadcrumbs::LogLevel::Warn,
+                                "mir-lowering",
+                                format!(
+                                    "Inlining placeholder SIMD comparison intrinsic {}",
+                                    def_path
+                                )
+                            );
+
+                            if args.len() != 2 {
+                                panic!(
+                                    "SIMD comparison intrinsic expected 2 args, got {} for {}",
+                                    args.len(),
+                                    def_path
+                                );
+                            }
+
+                            let lhs_operand = convert_operand(
+                                &args[0].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+                            let result_ty =
+                                get_place_type(destination, mir, tcx, instance, data_types);
+                            let temp_dest = format!(
+                                "{}_simd_cmp_{}",
+                                place_to_string(destination, tcx),
+                                bb.index()
+                            );
+
+                            let lowered_operand = if lhs_operand.get_type() == Some(result_ty.clone()) {
+                                lhs_operand
+                            } else {
+                                instructions.push(oomir::Instruction::Cast {
+                                    op: lhs_operand,
+                                    ty: result_ty.clone(),
+                                    dest: temp_dest.clone(),
+                                });
+                                oomir::Operand::Variable {
+                                    name: temp_dest,
+                                    ty: result_ty.clone(),
+                                }
+                            };
+
+                            instructions.extend(emit_instructions_to_set_value(
+                                destination,
+                                lowered_operand,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                            ));
 
                             if let Some(target_bb) = target {
                                 instructions.push(oomir::Instruction::Jump {
