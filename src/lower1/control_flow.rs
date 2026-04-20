@@ -403,6 +403,77 @@ pub fn convert_basic_block<'tcx>(
                             };
                         }
 
+                        if def_path.ends_with("avx512f::vpmovsdb") {
+                            breadcrumbs::log!(
+                                breadcrumbs::LogLevel::Warn,
+                                "mir-lowering",
+                                format!(
+                                    "Inlining placeholder lowering for foreign intrinsic {}",
+                                    def_path
+                                )
+                            );
+
+                            if args.len() != 3 {
+                                panic!(
+                                    "vpmovsdb expected 3 args, got {} for {}",
+                                    args.len(),
+                                    def_path
+                                );
+                            }
+
+                            let source_operand = convert_operand(
+                                &args[1].node,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                                &mut instructions,
+                            );
+                            let result_ty =
+                                get_place_type(destination, mir, tcx, instance, data_types);
+                            let temp_dest = format!(
+                                "{}_vpmovsdb_{}",
+                                place_to_string(destination, tcx),
+                                bb.index()
+                            );
+
+                            let lowered_operand =
+                                if source_operand.get_type() == Some(result_ty.clone()) {
+                                    source_operand
+                                } else {
+                                    instructions.push(oomir::Instruction::Cast {
+                                        op: source_operand,
+                                        ty: result_ty.clone(),
+                                        dest: temp_dest.clone(),
+                                    });
+                                    oomir::Operand::Variable {
+                                        name: temp_dest,
+                                        ty: result_ty.clone(),
+                                    }
+                                };
+
+                            let set_instrs = emit_instructions_to_set_value(
+                                destination,
+                                lowered_operand,
+                                tcx,
+                                instance,
+                                mir,
+                                data_types,
+                            );
+                            instructions.extend(set_instrs);
+
+                            if let Some(target_bb) = target {
+                                instructions.push(oomir::Instruction::Jump {
+                                    target: format!("bb{}", target_bb.index()),
+                                });
+                            }
+
+                            return oomir::BasicBlock {
+                                label,
+                                instructions,
+                            };
+                        }
+
                         if def_path.ends_with("intrinsics::simd::simd_insert")
                             || def_path.ends_with("intrinsics::simd::simd_insert_dyn")
                         {
@@ -1127,6 +1198,8 @@ pub fn convert_basic_block<'tcx>(
                                     let is_trait_method = tcx.is_trait(tcx.parent(*def_id));
 
                                     if is_trait_method {
+                                        let method_is_generic =
+                                            !tcx.generics_of(*def_id).own_params.is_empty();
                                         // Trait method call: check if it's monomorphized to a concrete type
                                         if let Some(first_arg) = args.get(0) {
                                             if let Some(ty) = first_arg.as_type() {
@@ -1135,6 +1208,22 @@ pub fn convert_basic_block<'tcx>(
                                                     ty.kind(),
                                                     rustc_middle::ty::TyKind::Dynamic(..)
                                                 ) {
+                                                    if method_is_generic {
+                                                        let mono_name =
+                                                            super::naming::mono_fn_name_from_call_operand(
+                                                                func, tcx, instance,
+                                                            )
+                                                            .unwrap();
+                                                        breadcrumbs::log!(
+                                                            breadcrumbs::LogLevel::Info,
+                                                            "mir-lowering",
+                                                            format!(
+                                                                "Generic trait method call with concrete type: def_id={:?}, using monomorphized name: {}",
+                                                                def_id, mono_name
+                                                            )
+                                                        );
+                                                        (mono_name, false)
+                                                    } else {
                                                     // Concrete type - use Type_method naming
                                                     let type_name = super::types::ty_to_oomir_type(
                                                         ty,
@@ -1169,6 +1258,7 @@ pub fn convert_basic_block<'tcx>(
                                                         )
                                                     );
                                                     (full_name, false)
+                                                    }
                                                 } else {
                                                     // Dynamic trait object - use dyn_Trait_method naming
                                                     let trait_name =

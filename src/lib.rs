@@ -159,6 +159,108 @@ fn should_skip_discovered_instance<'tcx>(
     None
 }
 
+fn collect_mir_dependencies<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    mir: &rustc_middle::mir::Body<'tcx>,
+    context: &str,
+    closures_to_lower: &mut std::collections::HashSet<rustc_hir::def_id::DefId>,
+    fn_instances_to_lower: &mut Vec<(rustc_middle::ty::Instance<'tcx>, String)>,
+    seen_fn_names: &mut std::collections::HashSet<String>,
+) {
+    use rustc_middle::ty::TypingEnv;
+
+    let Some(mentioned_items) = &mir.mentioned_items else {
+        return;
+    };
+
+    for mentioned in mentioned_items.iter() {
+        if let rustc_middle::mir::MentionedItem::Fn(fn_ty) = &mentioned.node {
+            if let rustc_middle::ty::TyKind::FnDef(fn_def_id, fn_args) = fn_ty.kind() {
+                let mut is_closure = false;
+                if let Some(first_arg) = fn_args.get(0) {
+                    if let Some(ty) = first_arg.as_type() {
+                        if let rustc_middle::ty::TyKind::Closure(closure_def_id, _) = ty.kind() {
+                            breadcrumbs::log!(
+                                breadcrumbs::LogLevel::Info,
+                                "closure-discovery",
+                                format!("Found closure {:?} in {}", closure_def_id, context)
+                            );
+                            closures_to_lower.insert(*closure_def_id);
+                            is_closure = true;
+                        }
+                    }
+                }
+                if is_closure || !fn_def_id.is_local() {
+                    continue;
+                }
+
+                if fn_args.has_non_region_param() {
+                    breadcrumbs::log!(
+                        breadcrumbs::LogLevel::Info,
+                        "backend",
+                        format!(
+                            "Skipping unresolved discovered function {:?} in {}: args still contain generic parameters {:?}",
+                            fn_def_id, context, fn_args
+                        )
+                    );
+                    continue;
+                }
+
+                if fn_args.has_aliases() {
+                    breadcrumbs::log!(
+                        breadcrumbs::LogLevel::Info,
+                        "backend",
+                        format!(
+                            "Skipping unresolved discovered function {:?} in {}: args still contain aliases {:?}",
+                            fn_def_id, context, fn_args
+                        )
+                    );
+                    continue;
+                }
+
+                let typing_env = TypingEnv::fully_monomorphized();
+                let Ok(Some(instance)) =
+                    rustc_middle::ty::Instance::try_resolve(tcx, typing_env, *fn_def_id, *fn_args)
+                else {
+                    breadcrumbs::log!(
+                        breadcrumbs::LogLevel::Info,
+                        "backend",
+                        format!(
+                            "Skipping unresolved discovered function {:?} in {}: instance resolution failed for args {:?}",
+                            fn_def_id, context, fn_args
+                        )
+                    );
+                    continue;
+                };
+                if let Some(reason) = should_skip_discovered_instance(tcx, instance) {
+                    breadcrumbs::log!(
+                        breadcrumbs::LogLevel::Info,
+                        "backend",
+                        format!("Skipping discovered instance {:?}: {}", instance, reason)
+                    );
+                    continue;
+                }
+                if let Some(assoc_item) = tcx.opt_associated_item(*fn_def_id) {
+                    let is_generic_trait_impl_method = assoc_item.trait_item_def_id().is_some()
+                        && !tcx.generics_of(*fn_def_id).own_params.is_empty();
+                    if assoc_item.trait_item_def_id().is_some() && !is_generic_trait_impl_method {
+                        breadcrumbs::log!(
+                            breadcrumbs::LogLevel::Info,
+                            "backend",
+                            format!("Skipping trait impl method: {:?}", fn_def_id)
+                        );
+                        continue;
+                    }
+                }
+                let name = lower1::naming::mono_fn_name_from_instance(tcx, instance);
+                if seen_fn_names.insert(name.clone()) {
+                    fn_instances_to_lower.push((instance, name));
+                }
+            }
+        }
+    }
+}
+
 impl CodegenBackend for MyBackend {
     fn locale_resource(&self) -> &'static str {
         ""
@@ -186,8 +288,6 @@ impl CodegenBackend for MyBackend {
         // Track monomorphized function instances to lower and avoid duplicates by name
         let mut fn_instances_to_lower: Vec<(rustc_middle::ty::Instance<'_>, String)> = Vec::new();
         let mut seen_fn_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-        use rustc_middle::ty::TypingEnv;
-
         // Iterate through all items in the crate and find functions
         let module_items = tcx.hir_crate_items(());
 
@@ -256,89 +356,14 @@ impl CodegenBackend for MyBackend {
                     format!("MIR for function {i}: {:?}", mir)
                 );
 
-                // Collect closures from mentioned_items in the MIR
-                if let Some(mentioned_items) = &mir.mentioned_items {
-                    for mentioned in mentioned_items.iter() {
-                        // Check if this mentioned item is a closure
-                        if let rustc_middle::mir::MentionedItem::Fn(fn_ty) = &mentioned.node {
-                            if let rustc_middle::ty::TyKind::FnDef(fn_def_id, fn_args) =
-                                fn_ty.kind()
-                            {
-                                // Check the first argument to see if it's a closure type
-                                let mut is_closure = false;
-                                if let Some(first_arg) = fn_args.get(0) {
-                                    if let Some(ty) = first_arg.as_type() {
-                                        if let rustc_middle::ty::TyKind::Closure(
-                                            closure_def_id,
-                                            _,
-                                        ) = ty.kind()
-                                        {
-                                            breadcrumbs::log!(
-                                                breadcrumbs::LogLevel::Info,
-                                                "closure-discovery",
-                                                format!(
-                                                    "Found closure {:?} in function {}",
-                                                    closure_def_id, i
-                                                )
-                                            );
-                                            closures_to_lower.insert(*closure_def_id);
-                                            is_closure = true;
-                                        }
-                                    }
-                                }
-                                if !is_closure {
-                                    // Non-closure function reference; enqueue monomorphized instance
-                                    let typing_env = TypingEnv::fully_monomorphized();
-                                    // Only lower functions defined in this crate
-                                    if fn_def_id.is_local() {
-                                        let instance = rustc_middle::ty::Instance::expect_resolve(
-                                            tcx,
-                                            typing_env,
-                                            *fn_def_id,
-                                            *fn_args,
-                                            rustc_span::DUMMY_SP,
-                                        );
-                                        if let Some(reason) =
-                                            should_skip_discovered_instance(tcx, instance)
-                                        {
-                                            breadcrumbs::log!(
-                                                breadcrumbs::LogLevel::Info,
-                                                "backend",
-                                                format!(
-                                                    "Skipping discovered instance {:?}: {}",
-                                                    instance, reason
-                                                )
-                                            );
-                                            continue;
-                                        }
-                                        // Skip trait method implementations (already lowered by impl block code with Type_method naming)
-                                        if let Some(assoc_item) =
-                                            tcx.opt_associated_item(*fn_def_id)
-                                        {
-                                            if assoc_item.trait_item_def_id().is_some() {
-                                                breadcrumbs::log!(
-                                                    breadcrumbs::LogLevel::Info,
-                                                    "backend",
-                                                    format!(
-                                                        "Skipping trait impl method: {:?}",
-                                                        fn_def_id
-                                                    )
-                                                );
-                                                continue;
-                                            }
-                                        }
-                                        let name = lower1::naming::mono_fn_name_from_instance(
-                                            tcx, instance,
-                                        );
-                                        if seen_fn_names.insert(name.clone()) {
-                                            fn_instances_to_lower.push((instance, name));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                collect_mir_dependencies(
+                    tcx,
+                    &mir,
+                    &format!("function {}", i),
+                    &mut closures_to_lower,
+                    &mut fn_instances_to_lower,
+                    &mut seen_fn_names,
+                );
 
                 breadcrumbs::log!(
                     breadcrumbs::LogLevel::Info,
@@ -518,86 +543,14 @@ impl CodegenBackend for MyBackend {
                         format!("MIR for function {i2}: {:?}", mir)
                     );
 
-                    // Collect closures from mentioned_items in the MIR
-                    if let Some(mentioned_items) = &mir.mentioned_items {
-                        for mentioned in mentioned_items.iter() {
-                            if let rustc_middle::mir::MentionedItem::Fn(fn_ty) = &mentioned.node {
-                                if let rustc_middle::ty::TyKind::FnDef(fn_def_id, fn_args) =
-                                    fn_ty.kind()
-                                {
-                                    let mut is_closure = false;
-                                    if let Some(first_arg) = fn_args.get(0) {
-                                        if let Some(ty) = first_arg.as_type() {
-                                            if let rustc_middle::ty::TyKind::Closure(
-                                                closure_def_id,
-                                                _,
-                                            ) = ty.kind()
-                                            {
-                                                breadcrumbs::log!(
-                                                    breadcrumbs::LogLevel::Info,
-                                                    "closure-discovery",
-                                                    format!(
-                                                        "Found closure {:?} in impl method {}",
-                                                        closure_def_id, i2
-                                                    )
-                                                );
-                                                closures_to_lower.insert(*closure_def_id);
-                                                is_closure = true;
-                                            }
-                                        }
-                                    }
-                                    if !is_closure {
-                                        let typing_env = TypingEnv::fully_monomorphized();
-                                        if fn_def_id.is_local() {
-                                            let instance =
-                                                rustc_middle::ty::Instance::expect_resolve(
-                                                    tcx,
-                                                    typing_env,
-                                                    *fn_def_id,
-                                                    *fn_args,
-                                                    rustc_span::DUMMY_SP,
-                                                );
-                                            if let Some(reason) =
-                                                should_skip_discovered_instance(tcx, instance)
-                                            {
-                                                breadcrumbs::log!(
-                                                    breadcrumbs::LogLevel::Info,
-                                                    "backend",
-                                                    format!(
-                                                        "Skipping discovered instance {:?}: {}",
-                                                        instance, reason
-                                                    )
-                                                );
-                                                continue;
-                                            }
-                                            // Skip trait method implementations (already lowered by impl block code with Type_method naming)
-                                            if let Some(assoc_item) =
-                                                tcx.opt_associated_item(*fn_def_id)
-                                            {
-                                                if assoc_item.trait_item_def_id().is_some() {
-                                                    breadcrumbs::log!(
-                                                        breadcrumbs::LogLevel::Info,
-                                                        "backend",
-                                                        format!(
-                                                            "Skipping trait impl method: {:?}",
-                                                            fn_def_id
-                                                        )
-                                                    );
-                                                    continue;
-                                                }
-                                            }
-                                            let name = lower1::naming::mono_fn_name_from_instance(
-                                                tcx, instance,
-                                            );
-                                            if seen_fn_names.insert(name.clone()) {
-                                                fn_instances_to_lower.push((instance, name));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    collect_mir_dependencies(
+                        tcx,
+                        &mir,
+                        &format!("impl method {}", i2),
+                        &mut closures_to_lower,
+                        &mut fn_instances_to_lower,
+                        &mut seen_fn_names,
+                    );
 
                     breadcrumbs::log!(
                         breadcrumbs::LogLevel::Info,
@@ -1098,7 +1051,10 @@ impl CodegenBackend for MyBackend {
         }
 
         // Lower all discovered monomorphized function instances
-        for (instance, name) in fn_instances_to_lower {
+        let mut fn_instance_idx = 0;
+        while fn_instance_idx < fn_instances_to_lower.len() {
+            let (instance, name) = fn_instances_to_lower[fn_instance_idx].clone();
+            fn_instance_idx += 1;
             if let Some(reason) = should_skip_discovered_instance(tcx, instance) {
                 breadcrumbs::log!(
                     breadcrumbs::LogLevel::Info,
@@ -1115,6 +1071,14 @@ impl CodegenBackend for MyBackend {
                 breadcrumbs::LogLevel::Info,
                 "mir-lowering",
                 format!("--- Lowering monomorphized function instance: {} ---", name)
+            );
+            collect_mir_dependencies(
+                tcx,
+                &mir,
+                &format!("monomorphized function instance {}", name),
+                &mut closures_to_lower,
+                &mut fn_instances_to_lower,
+                &mut seen_fn_names,
             );
             let (oomir_function, data_types) =
                 lower1::mir_to_oomir(tcx, instance, &mut mir, Some(name.clone()));
